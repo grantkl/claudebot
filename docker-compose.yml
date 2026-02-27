@@ -1,0 +1,5 @@
+services:
+  claudebot:
+    build: .
+    env_file: .env
+    restart: unless-stopped

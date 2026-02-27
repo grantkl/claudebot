@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+.claude-container/
+logs/
