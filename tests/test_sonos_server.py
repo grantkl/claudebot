@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -68,30 +69,97 @@ def _is_error(result: dict[str, Any]) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# _get_all_speakers
+# ---------------------------------------------------------------------------
+class TestGetAllSpeakers:
+    @patch.dict(os.environ, {"SONOS_SPEAKER_IPS": "192.168.1.10,192.168.1.11"})
+    @patch("src.mcp.sonos_server.soco.SoCo")
+    def test_uses_configured_ips(self, mock_soco: MagicMock) -> None:
+        s1 = _make_speaker("Living Room", "192.168.1.10")
+        s2 = _make_speaker("Bedroom", "192.168.1.11")
+        mock_instance = MagicMock()
+        mock_instance.all_zones = {s1, s2}
+        mock_soco.return_value = mock_instance
+
+        result = sonos_server._get_all_speakers()
+
+        assert result == {s1, s2}
+        mock_soco.assert_called_once_with("192.168.1.10")
+
+    @patch.dict(os.environ, {"SONOS_SPEAKER_IPS": ""})
+    @patch("src.mcp.sonos_server.soco.discover")
+    def test_falls_back_to_discover(self, mock_discover: MagicMock) -> None:
+        speakers = {_make_speaker()}
+        mock_discover.return_value = speakers
+
+        result = sonos_server._get_all_speakers()
+
+        assert result == speakers
+        mock_discover.assert_called_once_with(timeout=5)
+
+    @patch.dict(os.environ, {}, clear=False)
+    @patch("src.mcp.sonos_server.soco.discover")
+    def test_no_env_var_falls_back_to_discover(self, mock_discover: MagicMock) -> None:
+        os.environ.pop("SONOS_SPEAKER_IPS", None)
+        speakers = {_make_speaker()}
+        mock_discover.return_value = speakers
+
+        result = sonos_server._get_all_speakers()
+
+        assert result == speakers
+        mock_discover.assert_called_once_with(timeout=5)
+
+    @patch.dict(os.environ, {"SONOS_SPEAKER_IPS": "192.168.1.10"})
+    @patch("src.mcp.sonos_server.soco.SoCo")
+    def test_unreachable_ip_returns_empty(self, mock_soco: MagicMock) -> None:
+        mock_soco.return_value.all_zones = None
+
+        result = sonos_server._get_all_speakers()
+
+        assert result == set()
+
+    @patch.dict(os.environ, {"SONOS_SPEAKER_IPS": "192.168.1.10,192.168.1.11"})
+    @patch("src.mcp.sonos_server.soco.SoCo")
+    def test_first_ip_fails_tries_next(self, mock_soco: MagicMock) -> None:
+        s1 = _make_speaker("Living Room", "192.168.1.11")
+        good_instance = MagicMock()
+        good_instance.all_zones = {s1}
+
+        # First call raises, second succeeds
+        mock_soco.side_effect = [Exception("Connection refused"), good_instance]
+
+        result = sonos_server._get_all_speakers()
+
+        assert result == {s1}
+        assert mock_soco.call_count == 2
+
+
+# ---------------------------------------------------------------------------
 # sonos_discover
 # ---------------------------------------------------------------------------
 class TestSonosDiscover:
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_discovers_speakers(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_discovers_speakers(self, mock_get_all: MagicMock) -> None:
         s1 = _make_speaker("Living Room", "192.168.1.10")
         s2 = _make_speaker("Bedroom", "192.168.1.11", volume=20, is_coordinator=False)
-        mock_discover.return_value = [s1, s2]
+        mock_get_all.return_value = {s1, s2}
 
         result = await _discover({})
         data = json.loads(_parse_text(result))
 
         assert len(data) == 2
-        assert data[0]["name"] == "Living Room"
-        assert data[1]["name"] == "Bedroom"
-        assert data[0]["volume"] == 30
-        assert data[1]["is_coordinator"] is False
+        names = {d["name"] for d in data}
+        assert names == {"Living Room", "Bedroom"}
+        by_name = {d["name"]: d for d in data}
+        assert by_name["Living Room"]["volume"] == 30
+        assert by_name["Bedroom"]["is_coordinator"] is False
         assert not _is_error(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
+    @patch("src.mcp.sonos_server._get_all_speakers")
     async def test_no_speakers_returns_empty_list(
-        self, mock_discover: MagicMock
+        self, mock_get_all: MagicMock
     ) -> None:
-        mock_discover.return_value = None
+        mock_get_all.return_value = set()
 
         result = await _discover({})
         data = json.loads(_parse_text(result))
@@ -99,11 +167,11 @@ class TestSonosDiscover:
         assert data == []
         assert not _is_error(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
+    @patch("src.mcp.sonos_server._get_all_speakers")
     async def test_discovery_error_returns_error(
-        self, mock_discover: MagicMock
+        self, mock_get_all: MagicMock
     ) -> None:
-        mock_discover.side_effect = Exception("Network error")
+        mock_get_all.side_effect = Exception("Network error")
 
         result = await _discover({})
         assert _is_error(result)
@@ -114,10 +182,10 @@ class TestSonosDiscover:
 # sonos_get_state
 # ---------------------------------------------------------------------------
 class TestSonosGetState:
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_returns_current_state(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_returns_current_state(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _get_state({"speaker_name": "Living Room"})
         data = json.loads(_parse_text(result))
@@ -129,9 +197,9 @@ class TestSonosGetState:
         assert data["track"]["artist"] == "Test Artist"
         assert not _is_error(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_speaker_not_found(self, mock_discover: MagicMock) -> None:
-        mock_discover.return_value = [_make_speaker("Kitchen")]
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_speaker_not_found(self, mock_get_all: MagicMock) -> None:
+        mock_get_all.return_value = {_make_speaker("Kitchen")}
 
         result = await _get_state({"speaker_name": "Bathroom"})
         assert _is_error(result)
@@ -142,57 +210,57 @@ class TestSonosGetState:
 # sonos_play / pause / stop
 # ---------------------------------------------------------------------------
 class TestPlaybackControls:
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_play(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_play(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _play({"speaker_name": "Living Room"})
         assert not _is_error(result)
         assert "Playing" in _parse_text(result)
         speaker.play.assert_called_once()
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_pause(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_pause(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _pause({"speaker_name": "Living Room"})
         assert not _is_error(result)
         assert "Paused" in _parse_text(result)
         speaker.pause.assert_called_once()
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_stop(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_stop(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _stop({"speaker_name": "Living Room"})
         assert not _is_error(result)
         assert "Stopped" in _parse_text(result)
         speaker.stop.assert_called_once()
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_play_speaker_not_found(self, mock_discover: MagicMock) -> None:
-        mock_discover.return_value = []
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_play_speaker_not_found(self, mock_get_all: MagicMock) -> None:
+        mock_get_all.return_value = set()
 
         result = await _play({"speaker_name": "Nonexistent"})
         assert _is_error(result)
         assert "not found" in _parse_text(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_next(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_next(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _next({"speaker_name": "Living Room"})
         assert not _is_error(result)
         speaker.next.assert_called_once()
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_previous(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_previous(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _previous({"speaker_name": "Living Room"})
         assert not _is_error(result)
@@ -203,19 +271,19 @@ class TestPlaybackControls:
 # sonos_set_volume
 # ---------------------------------------------------------------------------
 class TestSetVolume:
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_sets_volume(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_sets_volume(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _set_volume({"speaker_name": "Living Room", "volume": 50})
         assert not _is_error(result)
         assert "50" in _parse_text(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_volume_out_of_range_low(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_volume_out_of_range_low(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _set_volume(
             {"speaker_name": "Living Room", "volume": -1}
@@ -223,10 +291,10 @@ class TestSetVolume:
         assert _is_error(result)
         assert "between 0 and 100" in _parse_text(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_volume_out_of_range_high(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_volume_out_of_range_high(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _set_volume(
             {"speaker_name": "Living Room", "volume": 101}
@@ -234,18 +302,18 @@ class TestSetVolume:
         assert _is_error(result)
         assert "between 0 and 100" in _parse_text(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_volume_boundary_zero(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_volume_boundary_zero(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _set_volume({"speaker_name": "Living Room", "volume": 0})
         assert not _is_error(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_volume_boundary_hundred(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_volume_boundary_hundred(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _set_volume(
             {"speaker_name": "Living Room", "volume": 100}
@@ -257,10 +325,10 @@ class TestSetVolume:
 # sonos_play_favorite
 # ---------------------------------------------------------------------------
 class TestPlayFavorite:
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_plays_matching_favorite(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_plays_matching_favorite(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         fav = MagicMock()
         fav.title = "Chill Vibes Playlist"
@@ -275,10 +343,10 @@ class TestPlayFavorite:
         assert "Chill Vibes Playlist" in _parse_text(result)
         speaker.play_uri.assert_called_once()
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_favorite_not_found(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_favorite_not_found(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         fav = MagicMock()
         fav.title = "Rock Classics"
@@ -291,12 +359,12 @@ class TestPlayFavorite:
         assert "not found" in _parse_text(result)
         assert "Rock Classics" in _parse_text(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
+    @patch("src.mcp.sonos_server._get_all_speakers")
     async def test_fuzzy_match_case_insensitive(
-        self, mock_discover: MagicMock
+        self, mock_get_all: MagicMock
     ) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         fav = MagicMock()
         fav.title = "My Morning Jazz"
@@ -315,11 +383,11 @@ class TestPlayFavorite:
 # sonos_group_speakers / sonos_ungroup_speaker
 # ---------------------------------------------------------------------------
 class TestGrouping:
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_group_speakers(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_group_speakers(self, mock_get_all: MagicMock) -> None:
         coordinator = _make_speaker("Living Room", "192.168.1.10")
         member = _make_speaker("Bedroom", "192.168.1.11")
-        mock_discover.return_value = [coordinator, member]
+        mock_get_all.return_value = {coordinator, member}
 
         result = await _group_speakers(
             {"coordinator_name": "Living Room", "member_names": ["Bedroom"]}
@@ -328,10 +396,10 @@ class TestGrouping:
         assert "Grouped" in _parse_text(result)
         member.join.assert_called_once_with(coordinator)
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_group_speaker_not_found(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_group_speaker_not_found(self, mock_get_all: MagicMock) -> None:
         coordinator = _make_speaker("Living Room", "192.168.1.10")
-        mock_discover.return_value = [coordinator]
+        mock_get_all.return_value = {coordinator}
 
         result = await _group_speakers(
             {"coordinator_name": "Living Room", "member_names": ["Nonexistent"]}
@@ -339,10 +407,10 @@ class TestGrouping:
         assert _is_error(result)
         assert "not found" in _parse_text(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_ungroup_speaker(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_ungroup_speaker(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _ungroup_speaker({"speaker_name": "Living Room"})
         assert not _is_error(result)
@@ -354,10 +422,10 @@ class TestGrouping:
 # sonos_set_sleep_timer
 # ---------------------------------------------------------------------------
 class TestSleepTimer:
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_set_timer(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_set_timer(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _set_sleep_timer(
             {"speaker_name": "Living Room", "minutes": 30}
@@ -366,10 +434,10 @@ class TestSleepTimer:
         assert "30 minutes" in _parse_text(result)
         speaker.set_sleep_timer.assert_called_once_with(1800)
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_cancel_timer(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_cancel_timer(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _set_sleep_timer(
             {"speaker_name": "Living Room", "minutes": 0}
@@ -383,10 +451,10 @@ class TestSleepTimer:
 # sonos_list_queue
 # ---------------------------------------------------------------------------
 class TestListQueue:
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_lists_queue_items(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_lists_queue_items(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         item1 = MagicMock()
         item1.title = "Song 1"
@@ -411,10 +479,10 @@ class TestListQueue:
 # sonos_play_uri
 # ---------------------------------------------------------------------------
 class TestPlayUri:
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_plays_uri(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_plays_uri(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _play_uri(
             {
@@ -426,10 +494,10 @@ class TestPlayUri:
         assert not _is_error(result)
         speaker.play_uri.assert_called_once()
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_plays_uri_without_title(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_plays_uri_without_title(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         result = await _play_uri(
             {
@@ -445,10 +513,10 @@ class TestPlayUri:
 # sonos_list_favorites
 # ---------------------------------------------------------------------------
 class TestListFavorites:
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_lists_favorites(self, mock_discover: MagicMock) -> None:
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_lists_favorites(self, mock_get_all: MagicMock) -> None:
         speaker = _make_speaker()
-        mock_discover.return_value = [speaker]
+        mock_get_all.return_value = {speaker}
 
         fav = MagicMock()
         fav.title = "My Playlist"
@@ -462,9 +530,9 @@ class TestListFavorites:
         assert data[0]["title"] == "My Playlist"
         assert not _is_error(result)
 
-    @patch("src.mcp.sonos_server.soco.discover")
-    async def test_no_speakers_returns_error(self, mock_discover: MagicMock) -> None:
-        mock_discover.return_value = None
+    @patch("src.mcp.sonos_server._get_all_speakers")
+    async def test_no_speakers_returns_error(self, mock_get_all: MagicMock) -> None:
+        mock_get_all.return_value = set()
 
         result = await _list_favorites({})
         assert _is_error(result)

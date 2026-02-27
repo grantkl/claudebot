@@ -18,6 +18,7 @@ class Config:
     log_level: str = "INFO"
     enable_mcp: bool = False
     homekit_pairing_file: str = ""
+    sonos_speaker_ips: list[str] = field(default_factory=list)
 
 
 def load_config() -> Config:
@@ -64,4 +65,9 @@ def load_config() -> Config:
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         enable_mcp=os.environ.get("ENABLE_MCP", "").lower() in ("1", "true", "yes"),
         homekit_pairing_file=os.environ.get("HOMEKIT_PAIRING_FILE", ""),
+        sonos_speaker_ips=[
+            ip.strip()
+            for ip in os.environ.get("SONOS_SPEAKER_IPS", "").split(",")
+            if ip.strip()
+        ],
     )

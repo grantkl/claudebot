@@ -1,5 +1,21 @@
 services:
+  auth-proxy:
+    image: nginx:alpine
+    env_file: .env
+    volumes:
+      - ./proxy/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    restart: unless-stopped
+
   claudebot:
     build: .
     env_file: .env
     restart: unless-stopped
+    depends_on:
+      - auth-proxy
+    volumes:
+      - ~/.homekit_pairings.json:/home/appuser/.homekit_pairings.json:ro
+    environment:
+      - ENABLE_MCP=true
+      - SONOS_SPEAKER_IPS=${SONOS_SPEAKER_IPS}
+      - CLAUDE_CODE_OAUTH_TOKEN=dummy-oauth-proxy-placeholder
+      - ANTHROPIC_BASE_URL=http://auth-proxy:8080

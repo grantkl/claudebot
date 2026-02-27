@@ -4,16 +4,41 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 from typing import Any
 
 import soco
 
 from claude_agent_sdk import SdkMcpTool, tool
 
+logger = logging.getLogger(__name__)
+
+
+def _get_all_speakers() -> set[soco.SoCo]:
+    """Discover all Sonos speakers, using configured IPs if available."""
+    configured_ips = os.environ.get("SONOS_SPEAKER_IPS", "")
+    if configured_ips.strip():
+        ips = [ip.strip() for ip in configured_ips.split(",") if ip.strip()]
+        logger.debug("Using configured Sonos speaker IPs: %s", ips)
+        for ip in ips:
+            try:
+                speaker = soco.SoCo(ip)
+                zones: set[soco.SoCo] = speaker.all_zones
+                if zones:
+                    return zones
+            except Exception:
+                logger.debug("Could not reach Sonos speaker at %s, trying next", ip)
+                continue
+        logger.warning("None of the configured Sonos IPs were reachable")
+        return set()
+    logger.debug("No SONOS_SPEAKER_IPS configured, falling back to network discovery")
+    return soco.discover(timeout=5) or set()
+
 
 def _find_speaker(name: str) -> soco.SoCo:
     """Find speaker by name (case-insensitive). Raises ValueError if not found."""
-    for speaker in soco.discover(timeout=5) or []:
+    for speaker in _get_all_speakers():
         if speaker.player_name.lower() == name.lower():
             return speaker
     raise ValueError(f"Speaker '{name}' not found")
@@ -41,7 +66,7 @@ async def _run_sync(fn: Any) -> Any:
 )
 async def sonos_discover(args: dict[str, Any]) -> dict[str, Any]:
     try:
-        speakers = await _run_sync(lambda: soco.discover(timeout=5))
+        speakers = await _run_sync(_get_all_speakers)
         if not speakers:
             return _text("[]")
         result = []
@@ -263,7 +288,7 @@ async def sonos_play_favorite(args: dict[str, Any]) -> dict[str, Any]:
 )
 async def sonos_list_favorites(args: dict[str, Any]) -> dict[str, Any]:
     try:
-        speakers = await _run_sync(lambda: soco.discover(timeout=5))
+        speakers = await _run_sync(_get_all_speakers)
         if not speakers:
             return _error("No Sonos speakers found")
         speaker = next(iter(speakers))

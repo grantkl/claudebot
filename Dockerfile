@@ -31,5 +31,6 @@ RUN useradd --create-home appuser
 USER appuser
 
 ENV PYTHONUNBUFFERED=1
+ENV ENABLE_MCP=true
 
 CMD ["python", "-m", "src.main"]
