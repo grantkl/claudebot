@@ -5,7 +5,7 @@ from typing import Any
 
 from slack_bolt.async_app import AsyncApp
 
-from .allowlist import REJECTION_MESSAGE, is_user_allowed
+from .authorized_users import is_authorized
 from .claude_client import ClaudeManager
 from .config import Config
 from .message_utils import format_error_message, split_message, strip_bot_mention
@@ -26,11 +26,6 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             result = await client.auth_test()
             bot_info["id"] = result["user_id"]
 
-        if not is_user_allowed(event["user"], config.allowed_user_ids):
-            thread_ts: str = event.get("thread_ts") or event["ts"]
-            await say(text=REJECTION_MESSAGE, thread_ts=thread_ts)
-            return
-
         text: str = event.get("text", "")
         cleaned_text = strip_bot_mention(text, str(bot_info["id"]))
         if not cleaned_text:
@@ -38,11 +33,13 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
 
         thread_ts = event.get("thread_ts") or event["ts"]
 
-        if not rate_limiter.check_and_record(event["user"]):
-            await say(text=RATE_LIMIT_MESSAGE, thread_ts=thread_ts)
-            return
+        authorized = is_authorized(event["user"], config.authorized_user_ids)
+        if not authorized:
+            if not rate_limiter.check_and_record(event["user"]):
+                await say(text=RATE_LIMIT_MESSAGE, thread_ts=thread_ts)
+                return
 
-        model = config.get_model_for_user(event["user"])
+        model = "sonnet" if authorized else "haiku"
 
         await client.reactions_add(
             name="hourglass_flowing_sand",

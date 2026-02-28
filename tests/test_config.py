@@ -9,18 +9,21 @@ from src.config import Config, load_config
 REQUIRED_ENV = {
     "SLACK_BOT_TOKEN": "xoxb-test-token",
     "SLACK_APP_TOKEN": "xapp-test-token",
-    "ALLOWED_USER_IDS": "U001,U002",
 }
 
 
 class TestLoadConfig:
-    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    @patch.dict(
+        "os.environ",
+        {**REQUIRED_ENV, "AUTHORIZED_USER_IDS": "U001,U002"},
+        clear=True,
+    )
     def test_valid_env_produces_correct_config(self):
         cfg = load_config()
         assert cfg.slack_bot_token == "xoxb-test-token"
         assert cfg.slack_app_token == "xapp-test-token"
         assert cfg.anthropic_api_key == ""
-        assert cfg.allowed_user_ids == {"U001", "U002"}
+        assert cfg.authorized_user_ids == {"U001", "U002"}
 
     @patch.dict("os.environ", {}, clear=True)
     def test_missing_all_required_vars_raises_value_error(self):
@@ -36,20 +39,24 @@ class TestLoadConfig:
         with pytest.raises(ValueError, match="SLACK_APP_TOKEN"):
             load_config()
 
-    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
-    def test_comma_separated_allowed_user_ids_parsed_into_set(self):
+    @patch.dict(
+        "os.environ",
+        {**REQUIRED_ENV, "AUTHORIZED_USER_IDS": "U001,U002"},
+        clear=True,
+    )
+    def test_comma_separated_authorized_user_ids_parsed_into_set(self):
         cfg = load_config()
-        assert isinstance(cfg.allowed_user_ids, set)
-        assert cfg.allowed_user_ids == {"U001", "U002"}
+        assert isinstance(cfg.authorized_user_ids, set)
+        assert cfg.authorized_user_ids == {"U001", "U002"}
 
     @patch.dict(
         "os.environ",
-        {**REQUIRED_ENV, "ALLOWED_USER_IDS": " U001 , U002 , U003 "},
+        {**REQUIRED_ENV, "AUTHORIZED_USER_IDS": " U001 , U002 , U003 "},
         clear=True,
     )
-    def test_allowed_user_ids_strips_whitespace(self):
+    def test_authorized_user_ids_strips_whitespace(self):
         cfg = load_config()
-        assert cfg.allowed_user_ids == {"U001", "U002", "U003"}
+        assert cfg.authorized_user_ids == {"U001", "U002", "U003"}
 
     @patch.dict("os.environ", REQUIRED_ENV, clear=True)
     def test_default_claude_model(self):
@@ -90,11 +97,6 @@ class TestLoadConfig:
         assert cfg.log_level == "DEBUG"
 
     @patch.dict("os.environ", REQUIRED_ENV, clear=True)
-    def test_default_user_models_is_empty(self):
-        cfg = load_config()
-        assert cfg.user_models == {}
-
-    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
     def test_default_rate_limit_messages_is_zero(self):
         cfg = load_config()
         assert cfg.rate_limit_messages == 0
@@ -106,33 +108,6 @@ class TestLoadConfig:
 
     @patch.dict(
         "os.environ",
-        {**REQUIRED_ENV, "USER_MODELS": "U123:opus,U456:haiku"},
-        clear=True,
-    )
-    def test_user_models_parsed_from_env(self):
-        cfg = load_config()
-        assert cfg.user_models == {"U123": "opus", "U456": "haiku"}
-
-    @patch.dict(
-        "os.environ",
-        {**REQUIRED_ENV, "USER_MODELS": "U123:opus,,badentry,U456:haiku"},
-        clear=True,
-    )
-    def test_malformed_user_models_entries_skipped(self):
-        cfg = load_config()
-        assert cfg.user_models == {"U123": "opus", "U456": "haiku"}
-
-    @patch.dict(
-        "os.environ",
-        {**REQUIRED_ENV, "USER_MODELS": " U123 : opus , U456 : haiku "},
-        clear=True,
-    )
-    def test_user_models_strips_whitespace(self):
-        cfg = load_config()
-        assert cfg.user_models == {"U123": "opus", "U456": "haiku"}
-
-    @patch.dict(
-        "os.environ",
         {**REQUIRED_ENV, "RATE_LIMIT_MESSAGES": "20", "RATE_LIMIT_WINDOW_SECONDS": "120"},
         clear=True,
     )
@@ -141,22 +116,16 @@ class TestLoadConfig:
         assert cfg.rate_limit_messages == 20
         assert cfg.rate_limit_window_seconds == 120
 
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_missing_authorized_user_ids_results_in_empty_set(self):
+        cfg = load_config()
+        assert cfg.authorized_user_ids == set()
 
-class TestGetModelForUser:
-    def test_returns_mapped_model(self):
-        cfg = Config(
-            slack_bot_token="t",
-            slack_app_token="t",
-            allowed_user_ids={"U001"},
-            user_models={"U001": "opus"},
-        )
-        assert cfg.get_model_for_user("U001") == "opus"
-
-    def test_falls_back_to_default_model(self):
-        cfg = Config(
-            slack_bot_token="t",
-            slack_app_token="t",
-            allowed_user_ids={"U001"},
-            claude_model="sonnet",
-        )
-        assert cfg.get_model_for_user("U999") == "sonnet"
+    @patch.dict(
+        "os.environ",
+        {**REQUIRED_ENV, "AUTHORIZED_USER_IDS": ""},
+        clear=True,
+    )
+    def test_empty_authorized_user_ids_results_in_empty_set(self):
+        cfg = load_config()
+        assert cfg.authorized_user_ids == set()

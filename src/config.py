@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 class Config:
     slack_bot_token: str
     slack_app_token: str
-    allowed_user_ids: set[str]
+    authorized_user_ids: set[str]
     anthropic_api_key: str = ""
     claude_model: str = "sonnet"
     claude_system_prompt: str = (
@@ -19,12 +19,8 @@ class Config:
     enable_mcp: bool = False
     homekit_pairing_file: str = ""
     sonos_speaker_ips: list[str] = field(default_factory=list)
-    user_models: dict[str, str] = field(default_factory=dict)
     rate_limit_messages: int = 0
     rate_limit_window_seconds: int = 3600
-
-    def get_model_for_user(self, user_id: str) -> str:
-        return self.user_models.get(user_id, self.claude_model)
 
 
 def load_config() -> Config:
@@ -44,34 +40,21 @@ def load_config() -> Config:
 
     anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
-    allowed_raw = os.environ.get("ALLOWED_USER_IDS", "")
-    if not allowed_raw:
-        missing.append("ALLOWED_USER_IDS")
-
     if missing:
         raise ValueError(
             f"Missing required environment variables: {', '.join(missing)}"
         )
 
-    allowed_user_ids = {
-        uid.strip() for uid in allowed_raw.split(",") if uid.strip()
+    authorized_raw = os.environ.get("AUTHORIZED_USER_IDS", "")
+    authorized_user_ids = {
+        uid.strip() for uid in authorized_raw.split(",") if uid.strip()
     }
-
-    user_models: dict[str, str] = {}
-    for entry in os.environ.get("USER_MODELS", "").split(","):
-        entry = entry.strip()
-        if ":" in entry:
-            parts = entry.split(":", 1)
-            uid = parts[0].strip()
-            model = parts[1].strip()
-            if uid and model:
-                user_models[uid] = model
 
     return Config(
         slack_bot_token=slack_bot_token,
         slack_app_token=slack_app_token,
         anthropic_api_key=anthropic_api_key,
-        allowed_user_ids=allowed_user_ids,
+        authorized_user_ids=authorized_user_ids,
         claude_model=os.environ.get("CLAUDE_MODEL", "sonnet"),
         claude_system_prompt=os.environ.get(
             "CLAUDE_SYSTEM_PROMPT",
@@ -86,7 +69,6 @@ def load_config() -> Config:
             for ip in os.environ.get("SONOS_SPEAKER_IPS", "").split(",")
             if ip.strip()
         ],
-        user_models=user_models,
         rate_limit_messages=int(os.environ.get("RATE_LIMIT_MESSAGES", "0")),
         rate_limit_window_seconds=int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "3600")),
     )
