@@ -48,7 +48,7 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         )
 
         try:
-            response = await claude_manager.send_message(thread_ts, cleaned_text, model=model)
+            response = await claude_manager.send_message(thread_ts, cleaned_text, model=model, include_mcp=authorized)
             for chunk in split_message(response):
                 await say(text=chunk, thread_ts=thread_ts)
         except Exception as exc:

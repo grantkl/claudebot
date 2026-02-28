@@ -118,7 +118,7 @@ class TestSlackApp:
 
         # Claude called with stripped text and sonnet model for authorized user
         claude_manager.send_message.assert_called_once_with(
-            event["ts"], "hello", model="sonnet"
+            event["ts"], "hello", model="sonnet", include_mcp=True
         )
 
         # Response posted
@@ -203,7 +203,7 @@ class TestSlackApp:
         await handler(event=event, say=say, client=client)
 
         claude_manager.send_message.assert_called_once_with(
-            event["ts"], "hello", model="sonnet"
+            event["ts"], "hello", model="sonnet", include_mcp=True
         )
         rate_limiter.check_and_record.assert_not_called()
 
@@ -228,7 +228,7 @@ class TestSlackApp:
 
         rate_limiter.check_and_record.assert_called_once_with("U001")
         claude_manager.send_message.assert_called_once_with(
-            event["ts"], "hello", model="haiku"
+            event["ts"], "hello", model="haiku", include_mcp=False
         )
 
     @pytest.mark.asyncio

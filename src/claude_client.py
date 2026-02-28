@@ -52,10 +52,11 @@ class ClaudeManager:
         for thread_ts in list(self._sessions):
             await self._remove_session(thread_ts)
 
-    async def send_message(self, thread_ts: str, text: str, model: str | None = None) -> str:
+    async def send_message(self, thread_ts: str, text: str, model: str | None = None, include_mcp: bool = True) -> str:
         if thread_ts not in self._sessions:
             system_prompt = self._config.claude_system_prompt
-            if self._config.enable_mcp:
+            mcp_servers = self._mcp_servers if include_mcp else {}
+            if mcp_servers:
                 system_prompt += (
                     "\n\nYou have access to smart home capabilities via MCP tools."
                     " You can control Sonos speakers and HomeKit devices."
@@ -65,7 +66,7 @@ class ClaudeManager:
                     model=model or self._config.claude_model,
                     system_prompt=system_prompt,
                     permission_mode="bypassPermissions",
-                    mcp_servers=self._mcp_servers,
+                    mcp_servers=mcp_servers,
                 )
             )
             await client.connect()
