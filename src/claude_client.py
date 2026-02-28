@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -57,10 +58,19 @@ class ClaudeManager:
             system_prompt = self._config.claude_system_prompt
             mcp_servers = self._mcp_servers if include_mcp else {}
             if mcp_servers:
-                system_prompt += (
-                    "\n\nYou have access to smart home capabilities via MCP tools."
-                    " You can control Sonos speakers and HomeKit devices."
-                )
+                if os.environ.get("HOMECLAW_MCP_URL"):
+                    system_prompt += (
+                        "\n\nYou have access to smart home capabilities via MCP tools."
+                        " You can control Sonos speakers."
+                        " You can also control HomeKit devices via HomeClaw, which provides"
+                        " access to all HomeKit devices including Thread-based devices."
+                        " HomeClaw supports rooms, scenes, and individual device control."
+                    )
+                else:
+                    system_prompt += (
+                        "\n\nYou have access to smart home capabilities via MCP tools."
+                        " You can control Sonos speakers and HomeKit devices."
+                    )
             client = ClaudeSDKClient(
                 options=ClaudeAgentOptions(
                     model=model or self._config.claude_model,

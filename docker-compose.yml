@@ -17,5 +17,6 @@ services:
     environment:
       - ENABLE_MCP=true
       - SONOS_SPEAKER_IPS=${SONOS_SPEAKER_IPS}
+      - HOMECLAW_MCP_URL=http://host.docker.internal:9876
       - CLAUDE_CODE_OAUTH_TOKEN=dummy-oauth-proxy-placeholder
       - ANTHROPIC_BASE_URL=http://auth-proxy:8080
