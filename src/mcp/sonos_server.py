@@ -6,9 +6,12 @@ import asyncio
 import json
 import logging
 import os
+import urllib.parse
+import urllib.request
 from typing import Any
 
 import soco
+from soco.plugins.sharelink import ShareLinkPlugin
 
 from claude_agent_sdk import SdkMcpTool, tool
 
@@ -467,6 +470,105 @@ async def sonos_list_queue(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 16. sonos_search_apple_music
+# ---------------------------------------------------------------------------
+@tool(
+    "sonos_search_apple_music",
+    "Search the Apple Music catalog. Returns matching songs with title, artist, album, and URL. Use sonos_play_apple_music to play a result.",
+    {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query (song name, artist, etc.)"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 25, "description": "Max results (default 5)"},
+        },
+        "required": ["query"],
+    },
+)
+async def sonos_search_apple_music(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        query = args["query"]
+        limit = args.get("limit", 5)
+        params = urllib.parse.urlencode(
+            {"term": query, "media": "music", "entity": "song", "country": "us", "limit": limit}
+        )
+        url = f"https://itunes.apple.com/search?{params}"
+
+        def _fetch() -> list[dict[str, Any]]:
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                data = json.loads(resp.read())
+            return [
+                {
+                    "title": r["trackName"],
+                    "artist": r["artistName"],
+                    "album": r["collectionName"],
+                    "url": r["trackViewUrl"],
+                }
+                for r in data.get("results", [])
+            ]
+
+        results = await _run_sync(_fetch)
+        if not results:
+            return _error(f"No results found for '{query}'")
+        return _text(json.dumps(results, indent=2))
+    except Exception as e:
+        return _error(f"Search failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# 17. sonos_play_apple_music
+# ---------------------------------------------------------------------------
+@tool(
+    "sonos_play_apple_music",
+    "Play an Apple Music song, album, or playlist on a Sonos speaker. Accepts an Apple Music URL (from sonos_search_apple_music) or a search query. Requires Apple Music to be linked in the Sonos app.",
+    {
+        "type": "object",
+        "properties": {
+            "speaker_name": {"type": "string"},
+            "url": {"type": "string", "description": "Apple Music URL (e.g., https://music.apple.com/us/album/...)"},
+            "query": {"type": "string", "description": "Search query — used if url is not provided"},
+        },
+        "required": ["speaker_name"],
+    },
+)
+async def sonos_play_apple_music(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        speaker = await _run_sync(lambda: _find_speaker(args["speaker_name"]))
+        url = args.get("url")
+
+        if not url:
+            query = args.get("query")
+            if not query:
+                return _error("Either 'url' or 'query' is required")
+            params = urllib.parse.urlencode(
+                {"term": query, "media": "music", "entity": "song", "country": "us", "limit": 1}
+            )
+            api_url = f"https://itunes.apple.com/search?{params}"
+
+            def _fetch() -> str | None:
+                with urllib.request.urlopen(api_url, timeout=10) as resp:
+                    data = json.loads(resp.read())
+                results = data.get("results", [])
+                return results[0]["trackViewUrl"] if results else None
+
+            url = await _run_sync(_fetch)
+            if not url:
+                return _error(f"No Apple Music results for '{query}'")
+
+        plugin = ShareLinkPlugin(speaker)
+        if not plugin.is_share_link(url):
+            return _error(f"Not a valid Apple Music URL: {url}")
+
+        queue_pos = await _run_sync(lambda: plugin.add_share_link_to_queue(url))
+        await _run_sync(lambda: speaker.play_from_queue(queue_pos - 1))
+
+        return _text(f"Playing Apple Music on {speaker.player_name}")
+    except ValueError as e:
+        return _error(str(e))
+    except Exception as e:
+        return _error(f"Failed to play Apple Music: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Export all tools
 # ---------------------------------------------------------------------------
 SONOS_TOOLS: list[SdkMcpTool] = [  # type: ignore[type-arg]
@@ -485,4 +587,6 @@ SONOS_TOOLS: list[SdkMcpTool] = [  # type: ignore[type-arg]
     sonos_ungroup_speaker,
     sonos_set_sleep_timer,
     sonos_list_queue,
+    sonos_search_apple_music,
+    sonos_play_apple_music,
 ]
