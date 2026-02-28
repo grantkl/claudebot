@@ -53,8 +53,12 @@ class ClaudeManager:
         for thread_ts in list(self._sessions):
             await self._remove_session(thread_ts)
 
-    async def send_message(self, thread_ts: str, text: str, model: str | None = None, include_mcp: bool = True) -> str:
-        if thread_ts not in self._sessions:
+    def has_session(self, thread_ts: str) -> bool:
+        return thread_ts in self._sessions
+
+    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, include_mcp: bool = True) -> str:
+        is_new_session = thread_ts not in self._sessions
+        if is_new_session:
             system_prompt = self._config.claude_system_prompt
             mcp_servers = self._mcp_servers if include_mcp else {}
             if mcp_servers:
@@ -84,11 +88,15 @@ class ClaudeManager:
                 client=client, last_accessed=time.time()
             )
 
+        query_text = text
+        if is_new_session and thread_context is not None:
+            query_text = thread_context + "\n\n" + text
+
         entry = self._sessions[thread_ts]
         async with entry.lock:
             entry.last_accessed = time.time()
             try:
-                await entry.client.query(text)
+                await entry.client.query(query_text)
                 response_parts: list[str] = []
                 async for msg in entry.client.receive_response():
                     if isinstance(msg, AssistantMessage):

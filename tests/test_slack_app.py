@@ -27,6 +27,7 @@ class _FakeAsyncApp:
 sys.modules.setdefault("slack_bolt", _mock_bolt)
 sys.modules.setdefault("slack_bolt.async_app", MagicMock())
 sys.modules.setdefault("claude_agent_sdk", MagicMock())
+sys.modules.setdefault("httpx", MagicMock())
 
 from src.rate_limiter import RATE_LIMIT_MESSAGE as RL_MESSAGE  # noqa: E402
 from src.slack_app import create_app  # noqa: E402
@@ -96,6 +97,7 @@ class TestSlackApp:
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value="Claude response")
+        claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = AsyncMock()
         client.auth_test = AsyncMock(return_value={"user_id": "B001"})
@@ -118,7 +120,8 @@ class TestSlackApp:
 
         # Claude called with stripped text and sonnet model for authorized user
         claude_manager.send_message.assert_called_once_with(
-            event["ts"], "hello", model="sonnet", include_mcp=True
+            event["ts"], "hello", thread_context=None,
+            model="sonnet", include_mcp=True,
         )
 
         # Response posted
@@ -136,6 +139,7 @@ class TestSlackApp:
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value="dm response")
+        claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = AsyncMock()
         client.auth_test = AsyncMock(return_value={"user_id": "B001"})
@@ -161,6 +165,7 @@ class TestSlackApp:
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(side_effect=RuntimeError("boom"))
+        claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = AsyncMock()
         client.auth_test = AsyncMock(return_value={"user_id": "B001"})
@@ -188,6 +193,7 @@ class TestSlackApp:
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
         client = AsyncMock()
@@ -203,7 +209,8 @@ class TestSlackApp:
         await handler(event=event, say=say, client=client)
 
         claude_manager.send_message.assert_called_once_with(
-            event["ts"], "hello", model="sonnet", include_mcp=True
+            event["ts"], "hello", thread_context=None,
+            model="sonnet", include_mcp=True,
         )
         rate_limiter.check_and_record.assert_not_called()
 
@@ -212,6 +219,7 @@ class TestSlackApp:
         config = _make_config(authorized_user_ids={"UOTHER"})
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter(allowed=True)
         say = AsyncMock()
         client = AsyncMock()
@@ -228,7 +236,8 @@ class TestSlackApp:
 
         rate_limiter.check_and_record.assert_called_once_with("U001")
         claude_manager.send_message.assert_called_once_with(
-            event["ts"], "hello", model="haiku", include_mcp=False
+            event["ts"], "hello", thread_context=None,
+            model="haiku", include_mcp=False,
         )
 
     @pytest.mark.asyncio
@@ -252,3 +261,179 @@ class TestSlackApp:
             thread_ts=event["ts"],
         )
         claude_manager.send_message.assert_not_called()
+
+    # --- New tests ---
+
+    @pytest.mark.asyncio
+    async def test_file_share_subtype_not_filtered(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        event = _make_event(subtype="file_share", files=[])
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        claude_manager.send_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_message_changed_subtype_still_filtered(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        say = AsyncMock()
+        client = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        event = _make_event(subtype="message_changed")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        say.assert_not_called()
+        claude_manager.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_thread_history_hydration_on_cold_session(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.has_session = MagicMock(return_value=False)
+        claude_manager.send_message = AsyncMock(return_value="response")
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+        client.conversations_replies = AsyncMock(return_value={
+            "messages": [
+                {"user": "U001", "text": "first msg"},
+                {"user": "B001", "text": "response"},
+                {"user": "U001", "text": "<@B001> follow up"},
+            ]
+        })
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        event = _make_event(
+            user="U001", text="<@B001> follow up",
+            thread_ts="parent_ts",
+        )
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        client.conversations_replies.assert_called_once_with(
+            channel="C001", ts="parent_ts",
+        )
+        call_args = claude_manager.send_message.call_args
+        thread_ctx = call_args.kwargs.get("thread_context") or call_args[1].get("thread_context")
+        assert thread_ctx is not None
+        assert "first msg" in thread_ctx
+
+    @pytest.mark.asyncio
+    async def test_thread_history_not_fetched_for_existing_session(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.has_session = MagicMock(return_value=True)
+        claude_manager.send_message = AsyncMock(return_value="response")
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+        client.conversations_replies = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        event = _make_event(
+            user="U001", text="<@B001> follow up",
+            thread_ts="parent_ts",
+        )
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        client.conversations_replies.assert_not_called()
+        claude_manager.send_message.assert_called_once_with(
+            "parent_ts", "follow up", thread_context=None,
+            model="sonnet", include_mcp=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_file_download_and_content_inclusion(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        mock_response = MagicMock()
+        mock_response.text = '{"key": "value"}'
+        mock_http_client = AsyncMock()
+        mock_http_client.get = AsyncMock(return_value=mock_response)
+        mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
+        mock_http_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp), \
+             patch("src.slack_app.httpx.AsyncClient", return_value=mock_http_client):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+            event = _make_event(
+                user="U001", text="<@B001> check this file",
+                files=[{
+                    "name": "test.json",
+                    "mimetype": "application/json",
+                    "url_private": "https://files.slack.com/test.json",
+                }],
+            )
+            handler = app._handlers["app_mention"]
+            await handler(event=event, say=say, client=client)
+
+        call_args = claude_manager.send_message.call_args
+        sent_text = call_args[0][1]
+        assert '{"key": "value"}' in sent_text
+
+    @pytest.mark.asyncio
+    async def test_large_code_block_posted_as_file(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        # Build a response with a code block that exceeds 50 lines
+        large_code = "\n".join([f"line {i}" for i in range(60)])
+        response_text = f"Here is the code:\n```python\n{large_code}\n```"
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value=response_text)
+        claude_manager.has_session = MagicMock(return_value=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+        client.files_upload_v2 = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        event = _make_event(user="U001", text="<@B001> show me code")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        client.files_upload_v2.assert_called_once()
+        upload_kwargs = client.files_upload_v2.call_args.kwargs
+        assert upload_kwargs["channel"] == "C001"
+        assert upload_kwargs["filename"] == "code.python"
+
+        # say should be called with placeholder text
+        say_text = say.call_args.kwargs["text"]
+        assert "[Code uploaded as file:" in say_text

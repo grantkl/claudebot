@@ -64,6 +64,10 @@ _mock_sdk.ResultMessage = _FakeResultMessage
 _orig_sdk = sys.modules.get("claude_agent_sdk")
 sys.modules["claude_agent_sdk"] = _mock_sdk
 
+# Force reimport so claude_client picks up the proper fake types even if another
+# test module (e.g. test_slack_app) already imported it with a generic MagicMock.
+sys.modules.pop("src.claude_client", None)
+
 from src.claude_client import ClaudeManager, SessionEntry  # noqa: E402
 
 if _orig_sdk is not None:
@@ -245,6 +249,73 @@ class TestClaudeManager:
         assert result == "r2"
         # Original client kept (no new ClaudeSDKClient created)
         assert manager._sessions["t1"].client is entry.client
+
+    @pytest.mark.asyncio
+    async def test_has_session_returns_true_for_existing(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello")
+        assert manager.has_session("t1") is True
+
+    @pytest.mark.asyncio
+    async def test_has_session_returns_false_for_missing(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        assert manager.has_session("nonexistent") is False
+
+    @pytest.mark.asyncio
+    async def test_thread_context_prepended_to_first_message(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello", thread_context="[Previous context]")
+        fake_client.query.assert_called_once_with("[Previous context]\n\nhello")
+
+    @pytest.mark.asyncio
+    async def test_thread_context_ignored_for_existing_session(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="r1")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "msg1")
+
+        # Re-set responses for second message
+        entry = manager._sessions["t1"]
+        entry.client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="r2")]),
+            _FakeResultMessage(),
+        ])
+        await manager.send_message("t1", "msg2", thread_context="[context]")
+        # The second query call should have just "msg2", not prepended with context
+        assert entry.client.query.call_args_list[1].args[0] == "msg2"
+
+    @pytest.mark.asyncio
+    async def test_thread_context_none_sends_text_only(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello", thread_context=None)
+        fake_client.query.assert_called_once_with("hello")
 
     @pytest.mark.asyncio
     async def test_none_model_falls_back_to_config(self):

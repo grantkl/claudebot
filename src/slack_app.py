@@ -3,12 +3,20 @@
 import logging
 from typing import Any
 
+import httpx
 from slack_bolt.async_app import AsyncApp
 
 from .authorized_users import is_authorized
 from .claude_client import ClaudeManager
 from .config import Config
-from .message_utils import format_error_message, split_message, strip_bot_mention
+from .message_utils import (
+    extract_large_code_blocks,
+    format_error_message,
+    format_file_attachments,
+    format_thread_context,
+    split_message,
+    strip_bot_mention,
+)
 from .rate_limiter import RATE_LIMIT_MESSAGE, RateLimiter
 
 logger = logging.getLogger(__name__)
@@ -18,8 +26,10 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
     app = AsyncApp(token=config.slack_bot_token)
     bot_info: dict[str, str | None] = {"id": None}
 
+    _SKIP_SUBTYPES = {"message_changed", "message_deleted", "message_replied", "channel_join", "channel_leave"}
+
     async def _handle_message(event: dict[str, Any], say: Any, client: Any) -> None:
-        if event.get("bot_id") or event.get("subtype"):
+        if event.get("bot_id") or event.get("subtype") in _SKIP_SUBTYPES:
             return
 
         if bot_info["id"] is None:
@@ -41,6 +51,48 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
 
         model = "sonnet" if authorized else "haiku"
 
+        # Thread history hydration for cold sessions in existing threads
+        thread_context: str | None = None
+        if not claude_manager.has_session(thread_ts) and "thread_ts" in event:
+            result = await client.conversations_replies(
+                channel=event["channel"], ts=thread_ts
+            )
+            messages = result.get("messages", [])
+            context_messages = messages[:-1]
+            if context_messages:
+                thread_context = format_thread_context(
+                    context_messages, str(bot_info["id"])
+                )
+
+        # File attachment reading
+        TEXT_MIMETYPES = {
+            "application/json",
+            "application/xml",
+            "application/javascript",
+            "application/x-yaml",
+            "application/x-python",
+        }
+        files = event.get("files", [])
+        if files:
+            files_content: list[tuple[str, str, str]] = []
+            async with httpx.AsyncClient() as http_client:
+                for file in files:
+                    mimetype = file.get("mimetype", "")
+                    if mimetype.startswith("text/") or mimetype in TEXT_MIMETYPES:
+                        resp = await http_client.get(
+                            file["url_private"],
+                            headers={
+                                "Authorization": f"Bearer {config.slack_bot_token}"
+                            },
+                        )
+                        files_content.append(
+                            (file["name"], mimetype, resp.text)
+                        )
+                    else:
+                        cleaned_text += f"\n\n[Attached file: {file['name']} ({mimetype}) - binary file, contents not included]"
+            if files_content:
+                cleaned_text += "\n\n" + format_file_attachments(files_content)
+
         await client.reactions_add(
             name="hourglass_flowing_sand",
             channel=event["channel"],
@@ -48,8 +100,25 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         )
 
         try:
-            response = await claude_manager.send_message(thread_ts, cleaned_text, model=model, include_mcp=authorized)
-            for chunk in split_message(response):
+            response = await claude_manager.send_message(
+                thread_ts, cleaned_text, thread_context=thread_context,
+                model=model, include_mcp=authorized,
+            )
+
+            # Extract large code blocks and post as files
+            modified_text, code_blocks = extract_large_code_blocks(response)
+            for block in code_blocks:
+                filename = block.filename or f"code.{block.language}"
+                await client.files_upload_v2(
+                    channel=event["channel"],
+                    content=block.content,
+                    filename=filename,
+                    thread_ts=thread_ts,
+                    title=filename,
+                )
+            post_text = modified_text if code_blocks else response
+
+            for chunk in split_message(post_text):
                 await say(text=chunk, thread_ts=thread_ts)
         except Exception as exc:
             await say(text=format_error_message(exc), thread_ts=thread_ts)
