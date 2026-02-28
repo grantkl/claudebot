@@ -1,5 +1,7 @@
 """Claude SDK client wrapper with per-thread session management."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
@@ -50,7 +52,7 @@ class ClaudeManager:
         for thread_ts in list(self._sessions):
             await self._remove_session(thread_ts)
 
-    async def send_message(self, thread_ts: str, text: str) -> str:
+    async def send_message(self, thread_ts: str, text: str, model: str | None = None) -> str:
         if thread_ts not in self._sessions:
             system_prompt = self._config.claude_system_prompt
             if self._config.enable_mcp:
@@ -60,7 +62,7 @@ class ClaudeManager:
                 )
             client = ClaudeSDKClient(
                 options=ClaudeAgentOptions(
-                    model=self._config.claude_model,
+                    model=model or self._config.claude_model,
                     system_prompt=system_prompt,
                     permission_mode="bypassPermissions",
                     mcp_servers=self._mcp_servers,

@@ -88,3 +88,75 @@ class TestLoadConfig:
         assert cfg.claude_model == "claude-opus-4-20250514"
         assert cfg.session_ttl_seconds == 7200
         assert cfg.log_level == "DEBUG"
+
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_default_user_models_is_empty(self):
+        cfg = load_config()
+        assert cfg.user_models == {}
+
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_default_rate_limit_messages_is_zero(self):
+        cfg = load_config()
+        assert cfg.rate_limit_messages == 0
+
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_default_rate_limit_window_seconds(self):
+        cfg = load_config()
+        assert cfg.rate_limit_window_seconds == 3600
+
+    @patch.dict(
+        "os.environ",
+        {**REQUIRED_ENV, "USER_MODELS": "U123:opus,U456:haiku"},
+        clear=True,
+    )
+    def test_user_models_parsed_from_env(self):
+        cfg = load_config()
+        assert cfg.user_models == {"U123": "opus", "U456": "haiku"}
+
+    @patch.dict(
+        "os.environ",
+        {**REQUIRED_ENV, "USER_MODELS": "U123:opus,,badentry,U456:haiku"},
+        clear=True,
+    )
+    def test_malformed_user_models_entries_skipped(self):
+        cfg = load_config()
+        assert cfg.user_models == {"U123": "opus", "U456": "haiku"}
+
+    @patch.dict(
+        "os.environ",
+        {**REQUIRED_ENV, "USER_MODELS": " U123 : opus , U456 : haiku "},
+        clear=True,
+    )
+    def test_user_models_strips_whitespace(self):
+        cfg = load_config()
+        assert cfg.user_models == {"U123": "opus", "U456": "haiku"}
+
+    @patch.dict(
+        "os.environ",
+        {**REQUIRED_ENV, "RATE_LIMIT_MESSAGES": "20", "RATE_LIMIT_WINDOW_SECONDS": "120"},
+        clear=True,
+    )
+    def test_rate_limit_overrides(self):
+        cfg = load_config()
+        assert cfg.rate_limit_messages == 20
+        assert cfg.rate_limit_window_seconds == 120
+
+
+class TestGetModelForUser:
+    def test_returns_mapped_model(self):
+        cfg = Config(
+            slack_bot_token="t",
+            slack_app_token="t",
+            allowed_user_ids={"U001"},
+            user_models={"U001": "opus"},
+        )
+        assert cfg.get_model_for_user("U001") == "opus"
+
+    def test_falls_back_to_default_model(self):
+        cfg = Config(
+            slack_bot_token="t",
+            slack_app_token="t",
+            allowed_user_ids={"U001"},
+            claude_model="sonnet",
+        )
+        assert cfg.get_model_for_user("U999") == "sonnet"

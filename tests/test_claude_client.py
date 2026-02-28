@@ -77,6 +77,7 @@ def _make_config(**overrides):
     cfg.claude_model = overrides.get("claude_model", "test-model")
     cfg.claude_system_prompt = overrides.get("claude_system_prompt", "test prompt")
     cfg.session_ttl_seconds = overrides.get("session_ttl_seconds", 3600)
+    cfg.enable_mcp = overrides.get("enable_mcp", False)
     return cfg
 
 
@@ -206,3 +207,56 @@ class TestClaudeManager:
         await manager.stop()
         assert manager._cleanup_task.cancelled() or manager._cleanup_task.done()
         assert len(manager._sessions) == 0
+
+    @pytest.mark.asyncio
+    async def test_model_param_used_for_new_session(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", model="opus")
+        # Verify the options passed to ClaudeSDKClient used "opus"
+        call_kwargs = mock_cls.call_args
+        assert call_kwargs[1]["options"].model == "opus" or call_kwargs.kwargs["options"].model == "opus"
+
+    @pytest.mark.asyncio
+    async def test_model_param_ignored_for_existing_session(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="r1")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "msg1", model="opus")
+
+        # Reuse session with different model - should keep original
+        entry = manager._sessions["t1"]
+        entry.client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="r2")]),
+            _FakeResultMessage(),
+        ])
+        result = await manager.send_message("t1", "msg2", model="haiku")
+        assert result == "r2"
+        # Original client kept (no new ClaudeSDKClient created)
+        assert manager._sessions["t1"].client is entry.client
+
+    @pytest.mark.asyncio
+    async def test_none_model_falls_back_to_config(self):
+        config = _make_config(claude_model="sonnet")
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello")
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert options.model == "sonnet"

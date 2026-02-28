@@ -9,11 +9,12 @@ from .allowlist import REJECTION_MESSAGE, is_user_allowed
 from .claude_client import ClaudeManager
 from .config import Config
 from .message_utils import format_error_message, split_message, strip_bot_mention
+from .rate_limiter import RATE_LIMIT_MESSAGE, RateLimiter
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(config: Config, claude_manager: ClaudeManager) -> AsyncApp:
+def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: RateLimiter) -> AsyncApp:
     app = AsyncApp(token=config.slack_bot_token)
     bot_info: dict[str, str | None] = {"id": None}
 
@@ -37,6 +38,12 @@ def create_app(config: Config, claude_manager: ClaudeManager) -> AsyncApp:
 
         thread_ts = event.get("thread_ts") or event["ts"]
 
+        if not rate_limiter.check_and_record(event["user"]):
+            await say(text=RATE_LIMIT_MESSAGE, thread_ts=thread_ts)
+            return
+
+        model = config.get_model_for_user(event["user"])
+
         await client.reactions_add(
             name="hourglass_flowing_sand",
             channel=event["channel"],
@@ -44,7 +51,7 @@ def create_app(config: Config, claude_manager: ClaudeManager) -> AsyncApp:
         )
 
         try:
-            response = await claude_manager.send_message(thread_ts, cleaned_text)
+            response = await claude_manager.send_message(thread_ts, cleaned_text, model=model)
             for chunk in split_message(response):
                 await say(text=chunk, thread_ts=thread_ts)
         except Exception as exc:

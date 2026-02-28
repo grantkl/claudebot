@@ -28,6 +28,7 @@ sys.modules.setdefault("slack_bolt", _mock_bolt)
 sys.modules.setdefault("slack_bolt.async_app", MagicMock())
 
 from src.allowlist import REJECTION_MESSAGE  # noqa: E402
+from src.rate_limiter import RATE_LIMIT_MESSAGE as RL_MESSAGE  # noqa: E402
 from src.slack_app import create_app  # noqa: E402
 
 
@@ -35,7 +36,14 @@ def _make_config(**overrides):
     cfg = MagicMock()
     cfg.slack_bot_token = overrides.get("slack_bot_token", "xoxb-test")
     cfg.allowed_user_ids = overrides.get("allowed_user_ids", {"U001"})
+    cfg.get_model_for_user = MagicMock(return_value=overrides.get("model_for_user", "test-model"))
     return cfg
+
+
+def _make_rate_limiter(allowed=True):
+    rl = MagicMock()
+    rl.check_and_record = MagicMock(return_value=allowed)
+    return rl
 
 
 def _make_event(**overrides):
@@ -58,7 +66,7 @@ class TestSlackApp:
         client = AsyncMock()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
-            app = create_app(config, claude_manager)
+            app = create_app(config, claude_manager, _make_rate_limiter())
 
         event = _make_event(bot_id="B999")
         handler = app._handlers["app_mention"]
@@ -75,7 +83,7 @@ class TestSlackApp:
         client = AsyncMock()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
-            app = create_app(config, claude_manager)
+            app = create_app(config, claude_manager, _make_rate_limiter())
 
         event = _make_event(subtype="message_changed")
         handler = app._handlers["app_mention"]
@@ -93,7 +101,7 @@ class TestSlackApp:
         client.auth_test = AsyncMock(return_value={"user_id": "B001"})
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
-            app = create_app(config, claude_manager)
+            app = create_app(config, claude_manager, _make_rate_limiter())
 
         event = _make_event(user="U999")
         handler = app._handlers["app_mention"]
@@ -117,7 +125,7 @@ class TestSlackApp:
         client.reactions_remove = AsyncMock()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
-            app = create_app(config, claude_manager)
+            app = create_app(config, claude_manager, _make_rate_limiter())
 
         event = _make_event(user="U001", text="<@B001> hello")
         handler = app._handlers["app_mention"]
@@ -132,7 +140,7 @@ class TestSlackApp:
 
         # Claude called with stripped text
         claude_manager.send_message.assert_called_once_with(
-            event["ts"], "hello"
+            event["ts"], "hello", model="test-model"
         )
 
         # Response posted
@@ -157,7 +165,7 @@ class TestSlackApp:
         client.reactions_remove = AsyncMock()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
-            app = create_app(config, claude_manager)
+            app = create_app(config, claude_manager, _make_rate_limiter())
 
         # channel_type != im should be ignored by the "message" handler
         event_not_im = _make_event(channel_type="channel", text="<@B001> hello")
@@ -182,7 +190,7 @@ class TestSlackApp:
         client.reactions_remove = AsyncMock()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
-            app = create_app(config, claude_manager)
+            app = create_app(config, claude_manager, _make_rate_limiter())
 
         event = _make_event(user="U001", text="<@B001> hello")
         handler = app._handlers["app_mention"]
@@ -196,3 +204,48 @@ class TestSlackApp:
 
         # Reaction still removed in finally block
         client.reactions_remove.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_user_gets_rejection(self):
+        config = _make_config(allowed_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        rate_limiter = _make_rate_limiter(allowed=False)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, rate_limiter)
+
+        event = _make_event(user="U001", text="<@B001> hello")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        say.assert_called_once_with(
+            text=RL_MESSAGE,
+            thread_ts=event["ts"],
+        )
+        claude_manager.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_model_from_config_passed_to_claude(self):
+        config = _make_config(allowed_user_ids={"U001"}, model_for_user="opus")
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        rate_limiter = _make_rate_limiter()
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, rate_limiter)
+
+        event = _make_event(user="U001", text="<@B001> hello")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        claude_manager.send_message.assert_called_once_with(
+            event["ts"], "hello", model="opus"
+        )

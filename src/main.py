@@ -8,6 +8,7 @@ from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 
 from .claude_client import ClaudeManager
 from .config import load_config
+from .rate_limiter import RateLimiter
 from .slack_app import create_app
 
 
@@ -23,7 +24,8 @@ async def main() -> None:
     manager = ClaudeManager(config)
     await manager.start()
 
-    app = create_app(config, manager)
+    rate_limiter = RateLimiter(config.rate_limit_messages, config.rate_limit_window_seconds)
+    app = create_app(config, manager, rate_limiter)
     handler = AsyncSocketModeHandler(app, config.slack_app_token)
 
     loop = asyncio.get_running_loop()
