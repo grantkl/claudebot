@@ -86,6 +86,12 @@ class ClaudeManager:
                         "\n\nYou have access to smart home capabilities via MCP tools."
                         " You can control Sonos speakers and HomeKit devices."
                     )
+            if not authorized:
+                system_prompt += (
+                    "\n\nDo not mention or reference any smart home, IoT, Sonos, HomeKit,"
+                    " or MCP capabilities. You do not have access to any such tools."
+                    " If asked about controlling devices, say you cannot help with that."
+                )
             client = ClaudeSDKClient(
                 options=ClaudeAgentOptions(
                     model=model or self._config.claude_model,
