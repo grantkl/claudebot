@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, AsyncIterator
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -56,7 +57,7 @@ class ClaudeManager:
     def has_session(self, thread_ts: str) -> bool:
         return thread_ts in self._sessions
 
-    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, include_mcp: bool = True) -> str:
+    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, include_mcp: bool = True, images: list[tuple[str, bytes]] | None = None) -> str:
         is_new_session = thread_ts not in self._sessions
         if is_new_session:
             system_prompt = self._config.claude_system_prompt
@@ -96,7 +97,29 @@ class ClaudeManager:
         async with entry.lock:
             entry.last_accessed = time.time()
             try:
-                await entry.client.query(query_text)
+                if images:
+                    content: list[dict[str, Any]] = [{"type": "text", "text": query_text}]
+                    for media_type, data in images:
+                        content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": base64.b64encode(data).decode(),
+                            },
+                        })
+
+                    async def _single_message(msg: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+                        yield msg
+
+                    await entry.client.query(_single_message({
+                        "type": "user",
+                        "message": {"role": "user", "content": content},
+                        "parent_tool_use_id": None,
+                        "session_id": "",
+                    }))
+                else:
+                    await entry.client.query(query_text)
                 response_parts: list[str] = []
                 async for msg in entry.client.receive_response():
                     if isinstance(msg, AssistantMessage):

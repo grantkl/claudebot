@@ -1,6 +1,7 @@
 """Tests for src.claude_client module."""
 
 import asyncio
+import base64
 import sys
 import time
 from dataclasses import dataclass
@@ -331,3 +332,112 @@ class TestClaudeManager:
         call_kwargs = mock_cls.call_args
         options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
         assert options.model == "sonnet"
+
+    @pytest.mark.asyncio
+    async def test_images_uses_async_iterable_query_path(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="got it")]),
+            _FakeResultMessage(),
+        ])
+        images = [("image/png", b"\x89PNG")]
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            result = await manager.send_message("t1", "describe this", images=images)
+        assert result == "got it"
+        # query() should have received an async iterable, not a string
+        arg = fake_client.query.call_args[0][0]
+        assert not isinstance(arg, str)
+        items = [item async for item in arg]
+        assert len(items) == 1
+        assert items[0]["type"] == "user"
+
+    @pytest.mark.asyncio
+    async def test_image_content_blocks_correctly_structured(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="ok")]),
+            _FakeResultMessage(),
+        ])
+        raw_bytes = b"\x89PNG\r\n"
+        images = [("image/png", raw_bytes)]
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "look", images=images)
+        arg = fake_client.query.call_args[0][0]
+        items = [item async for item in arg]
+        content = items[0]["message"]["content"]
+        # First block is text
+        assert content[0] == {"type": "text", "text": "look"}
+        # Second block is the image
+        img_block = content[1]
+        assert img_block["type"] == "image"
+        assert img_block["source"]["type"] == "base64"
+        assert img_block["source"]["media_type"] == "image/png"
+        assert img_block["source"]["data"] == base64.b64encode(raw_bytes).decode()
+
+    @pytest.mark.asyncio
+    async def test_no_images_uses_string_query_path(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello", images=None)
+        # query() should have received a plain string
+        fake_client.query.assert_called_once_with("hello")
+
+    @pytest.mark.asyncio
+    async def test_multiple_images_all_included(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="seen")]),
+            _FakeResultMessage(),
+        ])
+        images = [
+            ("image/png", b"img1"),
+            ("image/jpeg", b"img2"),
+            ("image/gif", b"img3"),
+        ]
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "multi", images=images)
+        arg = fake_client.query.call_args[0][0]
+        items = [item async for item in arg]
+        content = items[0]["message"]["content"]
+        # 1 text block + 3 image blocks
+        assert len(content) == 4
+        assert content[0]["type"] == "text"
+        for i, (mt, raw) in enumerate(images, start=1):
+            assert content[i]["type"] == "image"
+            assert content[i]["source"]["media_type"] == mt
+            assert content[i]["source"]["data"] == base64.b64encode(raw).decode()
+
+    @pytest.mark.asyncio
+    async def test_images_with_thread_context(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="ok")]),
+            _FakeResultMessage(),
+        ])
+        images = [("image/png", b"pic")]
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message(
+                "t1", "describe", thread_context="[Previous context]", images=images
+            )
+        arg = fake_client.query.call_args[0][0]
+        items = [item async for item in arg]
+        content = items[0]["message"]["content"]
+        # Thread context should be prepended in the text block
+        assert content[0]["type"] == "text"
+        assert content[0]["text"] == "[Previous context]\n\ndescribe"
+        # Image block still present
+        assert content[1]["type"] == "image"

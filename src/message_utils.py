@@ -1,5 +1,7 @@
 """Message formatting and splitting utilities for Slack."""
 
+from __future__ import annotations
+
 import re
 from typing import NamedTuple
 

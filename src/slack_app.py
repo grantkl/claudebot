@@ -1,5 +1,7 @@
 """Slack app event handlers and bot wiring."""
 
+from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -72,6 +74,8 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             "application/x-yaml",
             "application/x-python",
         }
+        IMAGE_MIMETYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+        images: list[tuple[str, bytes]] = []
         files = event.get("files", [])
         if files:
             files_content: list[tuple[str, str, str]] = []
@@ -88,6 +92,14 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                         files_content.append(
                             (file["name"], mimetype, resp.text)
                         )
+                    elif mimetype in IMAGE_MIMETYPES:
+                        resp = await http_client.get(
+                            file["url_private"],
+                            headers={
+                                "Authorization": f"Bearer {config.slack_bot_token}"
+                            },
+                        )
+                        images.append((mimetype, resp.content))
                     else:
                         cleaned_text += f"\n\n[Attached file: {file['name']} ({mimetype}) - binary file, contents not included]"
             if files_content:
@@ -103,6 +115,7 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             response = await claude_manager.send_message(
                 thread_ts, cleaned_text, thread_context=thread_context,
                 model=model, include_mcp=authorized,
+                images=images if images else None,
             )
 
             # Extract large code blocks and post as files

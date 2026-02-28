@@ -121,7 +121,7 @@ class TestSlackApp:
         # Claude called with stripped text and sonnet model for authorized user
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", include_mcp=True,
+            model="sonnet", include_mcp=True, images=None,
         )
 
         # Response posted
@@ -210,7 +210,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", include_mcp=True,
+            model="sonnet", include_mcp=True, images=None,
         )
         rate_limiter.check_and_record.assert_not_called()
 
@@ -237,7 +237,7 @@ class TestSlackApp:
         rate_limiter.check_and_record.assert_called_once_with("U001")
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="haiku", include_mcp=False,
+            model="haiku", include_mcp=False, images=None,
         )
 
     @pytest.mark.asyncio
@@ -365,7 +365,7 @@ class TestSlackApp:
         client.conversations_replies.assert_not_called()
         claude_manager.send_message.assert_called_once_with(
             "parent_ts", "follow up", thread_context=None,
-            model="sonnet", include_mcp=True,
+            model="sonnet", include_mcp=True, images=None,
         )
 
     @pytest.mark.asyncio
@@ -405,6 +405,248 @@ class TestSlackApp:
         call_args = claude_manager.send_message.call_args
         sent_text = call_args[0][1]
         assert '{"key": "value"}' in sent_text
+
+    # --- Image support tests ---
+
+    @pytest.mark.asyncio
+    async def test_image_file_downloaded_and_passed_to_send_message(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="I see an image")
+        claude_manager.has_session = MagicMock(return_value=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        mock_response = MagicMock()
+        mock_response.content = b"fake-png-bytes"
+        mock_http_client = AsyncMock()
+        mock_http_client.get = AsyncMock(return_value=mock_response)
+        mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
+        mock_http_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp), \
+             patch("src.slack_app.httpx.AsyncClient", return_value=mock_http_client):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+            event = _make_event(
+                user="U001", text="<@B001> what is this",
+                files=[{
+                    "name": "photo.png",
+                    "mimetype": "image/png",
+                    "url_private": "https://files.slack.com/photo.png",
+                }],
+            )
+            handler = app._handlers["app_mention"]
+            await handler(event=event, say=say, client=client)
+
+        call_kwargs = claude_manager.send_message.call_args.kwargs
+        assert call_kwargs["images"] == [("image/png", b"fake-png-bytes")]
+
+    @pytest.mark.asyncio
+    async def test_multiple_image_files_all_forwarded(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="I see images")
+        claude_manager.has_session = MagicMock(return_value=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        png_response = MagicMock()
+        png_response.content = b"png-bytes"
+        jpeg_response = MagicMock()
+        jpeg_response.content = b"jpeg-bytes"
+
+        mock_http_client = AsyncMock()
+        mock_http_client.get = AsyncMock(side_effect=[png_response, jpeg_response])
+        mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
+        mock_http_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp), \
+             patch("src.slack_app.httpx.AsyncClient", return_value=mock_http_client):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+            event = _make_event(
+                user="U001", text="<@B001> compare these",
+                files=[
+                    {
+                        "name": "a.png",
+                        "mimetype": "image/png",
+                        "url_private": "https://files.slack.com/a.png",
+                    },
+                    {
+                        "name": "b.jpg",
+                        "mimetype": "image/jpeg",
+                        "url_private": "https://files.slack.com/b.jpg",
+                    },
+                ],
+            )
+            handler = app._handlers["app_mention"]
+            await handler(event=event, say=say, client=client)
+
+        call_kwargs = claude_manager.send_message.call_args.kwargs
+        assert call_kwargs["images"] == [
+            ("image/png", b"png-bytes"),
+            ("image/jpeg", b"jpeg-bytes"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_non_image_binary_file_gets_metadata_note(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        event = _make_event(
+            user="U001", text="<@B001> check this",
+            files=[{
+                "name": "report.pdf",
+                "mimetype": "application/pdf",
+                "url_private": "https://files.slack.com/report.pdf",
+            }],
+        )
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        call_args = claude_manager.send_message.call_args
+        sent_text = call_args[0][1]
+        assert "[Attached file: report.pdf (application/pdf) - binary file, contents not included]" in sent_text
+        # images should be None (empty list → None)
+        assert call_args.kwargs["images"] is None
+
+    @pytest.mark.asyncio
+    async def test_mixed_text_and_image_files(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        text_response = MagicMock()
+        text_response.text = "file content here"
+        image_response = MagicMock()
+        image_response.content = b"gif-bytes"
+
+        mock_http_client = AsyncMock()
+        mock_http_client.get = AsyncMock(side_effect=[text_response, image_response])
+        mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
+        mock_http_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp), \
+             patch("src.slack_app.httpx.AsyncClient", return_value=mock_http_client):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+            event = _make_event(
+                user="U001", text="<@B001> look at these",
+                files=[
+                    {
+                        "name": "data.json",
+                        "mimetype": "application/json",
+                        "url_private": "https://files.slack.com/data.json",
+                    },
+                    {
+                        "name": "diagram.gif",
+                        "mimetype": "image/gif",
+                        "url_private": "https://files.slack.com/diagram.gif",
+                    },
+                ],
+            )
+            handler = app._handlers["app_mention"]
+            await handler(event=event, say=say, client=client)
+
+        call_args = claude_manager.send_message.call_args
+        sent_text = call_args[0][1]
+        # Text file content should be in the message text
+        assert "file content here" in sent_text
+        # Image should be in images param
+        assert call_args.kwargs["images"] == [("image/gif", b"gif-bytes")]
+
+    @pytest.mark.asyncio
+    async def test_no_files_sends_no_images(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        event = _make_event(user="U001", text="<@B001> hello")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        call_kwargs = claude_manager.send_message.call_args.kwargs
+        assert call_kwargs["images"] is None
+
+    @pytest.mark.asyncio
+    async def test_supported_image_mimetypes(self):
+        """All four supported image types (png, jpeg, gif, webp) are downloaded."""
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        mimetypes = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+        responses = []
+        for mt in mimetypes:
+            r = MagicMock()
+            r.content = f"{mt}-bytes".encode()
+            responses.append(r)
+
+        mock_http_client = AsyncMock()
+        mock_http_client.get = AsyncMock(side_effect=responses)
+        mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
+        mock_http_client.__aexit__ = AsyncMock(return_value=False)
+
+        files = [
+            {"name": f"img.{mt.split('/')[1]}", "mimetype": mt, "url_private": f"https://files.slack.com/img.{mt.split('/')[1]}"}
+            for mt in mimetypes
+        ]
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp), \
+             patch("src.slack_app.httpx.AsyncClient", return_value=mock_http_client):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+            event = _make_event(
+                user="U001", text="<@B001> check all images",
+                files=files,
+            )
+            handler = app._handlers["app_mention"]
+            await handler(event=event, say=say, client=client)
+
+        call_kwargs = claude_manager.send_message.call_args.kwargs
+        images = call_kwargs["images"]
+        assert len(images) == 4
+        assert [mt for mt, _ in images] == mimetypes
+        for mt, data in images:
+            assert data == f"{mt}-bytes".encode()
 
     @pytest.mark.asyncio
     async def test_large_code_block_posted_as_file(self):
