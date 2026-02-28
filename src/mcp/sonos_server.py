@@ -37,11 +37,20 @@ def _get_all_speakers() -> set[soco.SoCo]:
 
 
 def _find_speaker(name: str) -> soco.SoCo:
-    """Find speaker by name (case-insensitive). Raises ValueError if not found."""
-    for speaker in _get_all_speakers():
-        if speaker.player_name.lower() == name.lower():
+    """Find speaker by name (case-insensitive). Raises ValueError if not found.
+
+    When multiple speakers share the same name (e.g. a grouped home-theatre
+    setup where the Arc, surrounds and sub all report the same room name),
+    the group coordinator is preferred so that playback-state queries and
+    transport commands are always directed at the right device.
+    """
+    matches = [s for s in _get_all_speakers() if s.player_name.lower() == name.lower()]
+    if not matches:
+        raise ValueError(f"Speaker '{name}' not found")
+    for speaker in matches:
+        if speaker.is_coordinator:
             return speaker
-    raise ValueError(f"Speaker '{name}' not found")
+    return matches[0]
 
 
 def _text(text: str) -> dict[str, Any]:

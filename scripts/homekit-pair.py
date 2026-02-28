@@ -15,12 +15,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from mcp.homekit_pairing import get_pairing_file, list_aliases, load_pairings, save_pairings
 
 
+async def _make_controller():
+    """Create a Controller with its own zeroconf + service browser."""
+    from aiohomekit import Controller
+    from zeroconf.asyncio import AsyncZeroconf, AsyncServiceBrowser
+
+    azc = AsyncZeroconf()
+    hap_types = ["_hap._tcp.local.", "_hap._udp.local."]
+    browser = AsyncServiceBrowser(azc.zeroconf, hap_types, handlers=[lambda **_: None])
+    controller = Controller(azc)
+    return azc, browser, controller
+
+
 async def cmd_discover(args: argparse.Namespace) -> None:
     """Discover unpaired HomeKit accessories on the network."""
-    from aiohomekit import Controller
+    azc, browser, controller = await _make_controller()
 
     print("Discovering HomeKit accessories (10s timeout)...")
-    async with Controller() as controller:
+    async with controller:
         found = []
         async for discovery in controller.async_discover(timeout=10):
             desc = discovery.description
@@ -41,8 +53,6 @@ async def cmd_discover(args: argparse.Namespace) -> None:
 
 async def cmd_pair(args: argparse.Namespace) -> None:
     """Pair a HomeKit device and save under alias."""
-    from aiohomekit import Controller
-
     device_id = args.device_id
     pin = args.pin
     alias = args.alias
@@ -53,7 +63,8 @@ async def cmd_pair(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     print(f"Pairing with device '{device_id}' as alias '{alias}'...")
-    async with Controller() as controller:
+    azc, browser, controller = await _make_controller()
+    async with controller:
         discovery = await controller.async_find(device_id, timeout=10)
         finish = await discovery.async_start_pairing(alias)
         pairing = await finish(pin)
@@ -78,8 +89,6 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 async def cmd_unpair(args: argparse.Namespace) -> None:
     """Remove a pairing."""
-    from aiohomekit import Controller
-
     alias = args.alias
     pairings = load_pairings()
     if alias not in pairings:
@@ -88,7 +97,8 @@ async def cmd_unpair(args: argparse.Namespace) -> None:
 
     print(f"Removing pairing for '{alias}'...")
     try:
-        async with Controller() as controller:
+        azc, browser, controller = await _make_controller()
+        async with controller:
             controller.load_data(str(get_pairing_file()))
             if alias in controller.aliases:
                 await controller.remove_pairing(alias)
