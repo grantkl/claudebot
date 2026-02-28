@@ -122,6 +122,7 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="sonnet", include_mcp=True, images=None,
+            disallowed_tools=None, authorized=True,
         )
 
         # Response posted
@@ -211,6 +212,7 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="sonnet", include_mcp=True, images=None,
+            disallowed_tools=None, authorized=True,
         )
         rate_limiter.check_and_record.assert_not_called()
 
@@ -238,6 +240,8 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="haiku", include_mcp=False, images=None,
+            disallowed_tools=["Bash"],
+            authorized=False,
         )
 
     @pytest.mark.asyncio
@@ -366,6 +370,7 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             "parent_ts", "follow up", thread_context=None,
             model="sonnet", include_mcp=True, images=None,
+            disallowed_tools=None, authorized=True,
         )
 
     @pytest.mark.asyncio
@@ -679,3 +684,110 @@ class TestSlackApp:
         # say should be called with placeholder text
         say_text = say.call_args.kwargs["text"]
         assert "[Code uploaded as file:" in say_text
+
+    @pytest.mark.asyncio
+    async def test_unauthorized_user_gets_disallowed_tools(self):
+        config = _make_config(authorized_user_ids={"UOTHER"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        rate_limiter = _make_rate_limiter(allowed=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, rate_limiter)
+
+        event = _make_event(user="U001", text="<@B001> hello")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        claude_manager.send_message.assert_called_once_with(
+            event["ts"], "hello", thread_context=None,
+            model="haiku", include_mcp=False, images=None,
+            disallowed_tools=["Bash"],
+            authorized=False,
+        )
+
+    @pytest.mark.asyncio
+    async def test_authorized_user_gets_no_disallowed_tools(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        rate_limiter = _make_rate_limiter()
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, rate_limiter)
+
+        event = _make_event(user="U001", text="<@B001> hello")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        claude_manager.send_message.assert_called_once_with(
+            event["ts"], "hello", thread_context=None,
+            model="sonnet", include_mcp=True, images=None,
+            disallowed_tools=None, authorized=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_unauthorized_user_evicts_authorized_session(self):
+        config = _make_config(authorized_user_ids={"UOTHER"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        claude_manager.is_authorized_session = MagicMock(return_value=True)
+        claude_manager.remove_session = AsyncMock()
+        rate_limiter = _make_rate_limiter(allowed=True)
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, rate_limiter)
+
+        event = _make_event(user="U001", text="<@B001> hello")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        claude_manager.remove_session.assert_called_once_with(event["ts"])
+        claude_manager.send_message.assert_called_once_with(
+            event["ts"], "hello", thread_context=None,
+            model="haiku", include_mcp=False, images=None,
+            disallowed_tools=["Bash"],
+            authorized=False,
+        )
+
+    @pytest.mark.asyncio
+    async def test_authorized_user_does_not_evict_session(self):
+        config = _make_config(authorized_user_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        claude_manager.is_authorized_session = MagicMock(return_value=True)
+        claude_manager.remove_session = AsyncMock()
+        rate_limiter = _make_rate_limiter()
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, rate_limiter)
+
+        event = _make_event(user="U001", text="<@B001> hello")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        claude_manager.remove_session.assert_not_called()

@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 class SessionEntry:
     client: ClaudeSDKClient
     last_accessed: float
+    authorized: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -57,7 +58,16 @@ class ClaudeManager:
     def has_session(self, thread_ts: str) -> bool:
         return thread_ts in self._sessions
 
-    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, include_mcp: bool = True, images: list[tuple[str, bytes]] | None = None) -> str:
+    def is_authorized_session(self, thread_ts: str) -> bool | None:
+        entry = self._sessions.get(thread_ts)
+        if entry is None:
+            return None
+        return entry.authorized
+
+    async def remove_session(self, thread_ts: str) -> None:
+        await self._remove_session(thread_ts)
+
+    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, include_mcp: bool = True, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False) -> str:
         is_new_session = thread_ts not in self._sessions
         if is_new_session:
             system_prompt = self._config.claude_system_prompt
@@ -82,11 +92,12 @@ class ClaudeManager:
                     system_prompt=system_prompt,
                     permission_mode="bypassPermissions",
                     mcp_servers=mcp_servers,
+                    disallowed_tools=disallowed_tools or [],
                 )
             )
             await client.connect()
             self._sessions[thread_ts] = SessionEntry(
-                client=client, last_accessed=time.time()
+                client=client, last_accessed=time.time(), authorized=authorized
             )
 
         query_text = text

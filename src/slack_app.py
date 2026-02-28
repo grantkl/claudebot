@@ -52,6 +52,7 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                 return
 
         model = "sonnet" if authorized else "haiku"
+        disallowed_tools = None if authorized else ["Bash"]
 
         # Thread history hydration for cold sessions in existing threads
         thread_context: str | None = None
@@ -105,6 +106,9 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             if files_content:
                 cleaned_text += "\n\n" + format_file_attachments(files_content)
 
+        if not authorized and claude_manager.is_authorized_session(thread_ts):
+            await claude_manager.remove_session(thread_ts)
+
         await client.reactions_add(
             name="hourglass_flowing_sand",
             channel=event["channel"],
@@ -116,6 +120,8 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                 thread_ts, cleaned_text, thread_context=thread_context,
                 model=model, include_mcp=authorized,
                 images=images if images else None,
+                disallowed_tools=disallowed_tools,
+                authorized=authorized,
             )
 
             # Extract large code blocks and post as files

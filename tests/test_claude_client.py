@@ -441,3 +441,65 @@ class TestClaudeManager:
         assert content[0]["text"] == "[Previous context]\n\ndescribe"
         # Image block still present
         assert content[1]["type"] == "image"
+
+    @pytest.mark.asyncio
+    async def test_disallowed_tools_passed_to_options(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", disallowed_tools=["Bash"])
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert options.disallowed_tools == ["Bash"]
+
+    @pytest.mark.asyncio
+    async def test_disallowed_tools_none_defaults_to_empty_list(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello")
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert options.disallowed_tools == []
+
+    @pytest.mark.asyncio
+    async def test_authorized_flag_stored_on_session(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello", authorized=True)
+        assert manager.is_authorized_session("t1") is True
+
+    @pytest.mark.asyncio
+    async def test_is_authorized_session_returns_none_for_missing(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        assert manager.is_authorized_session("nonexistent") is None
+
+    @pytest.mark.asyncio
+    async def test_unauthorized_session_flag(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello")
+        assert manager.is_authorized_session("t1") is False
