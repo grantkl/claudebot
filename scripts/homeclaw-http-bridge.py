@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.11
 """HTTP-to-stdio MCP bridge for HomeClaw.
 
 Spawns a long-running HomeClaw MCP subprocess and exposes it over HTTP
 so Docker containers can reach it via the network.
 
 Usage:
-    ./homeclaw-http-bridge.py [--port 9876] [--command "homeclaw-cli mcp"]
+    ./homeclaw-http-bridge.py [--port 9876] [--command "node /path/to/mcp-server.js"]
 """
 
 import argparse
@@ -16,7 +16,7 @@ import sys
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-proc: subprocess.Popen | None = None
+proc: subprocess.Popen[str] | None = None
 proc_lock = threading.Lock()
 
 
@@ -62,7 +62,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description="HTTP-to-stdio MCP bridge")
     parser.add_argument("--port", type=int, default=9876, help="Port to listen on (default: 9876)")
-    parser.add_argument("--command", default="homeclaw-cli mcp", help="Subprocess command (default: homeclaw-cli mcp)")
+    parser.add_argument("--command", default="node /Applications/HomeClaw.app/Contents/Resources/mcp-server.js", help="Subprocess command (default: node mcp-server.js)")
     args = parser.parse_args()
 
     global proc
