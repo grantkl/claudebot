@@ -1,8 +1,8 @@
 #!/usr/bin/env python3.11
 """HTTP-to-stdio MCP bridge for HomeClaw.
 
-Spawns a long-running HomeClaw MCP subprocess and exposes it over HTTP
-so Docker containers can reach it via the network.
+Spawns a fresh MCP subprocess per request to avoid stale protocol state.
+Each request gets its own initialize → method → response cycle.
 
 Usage:
     ./homeclaw-http-bridge.py [--port 9876] [--command "node /path/to/mcp-server.js"]
@@ -10,14 +10,52 @@ Usage:
 
 import argparse
 import json
-import signal
 import subprocess
 import sys
-import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-proc: subprocess.Popen[str] | None = None
-proc_lock = threading.Lock()
+COMMAND: list[str] = []
+
+INIT_REQUEST = {
+    "jsonrpc": "2.0",
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "homeclaw-bridge", "version": "1.0"},
+    },
+    "id": "__init__",
+}
+
+
+def _call_mcp(request: dict) -> dict:
+    """Spawn subprocess, initialize MCP, send request, return response."""
+    proc = subprocess.Popen(
+        COMMAND,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+    try:
+        # Initialize the MCP session
+        proc.stdin.write(json.dumps(INIT_REQUEST) + "\n")
+        proc.stdin.flush()
+        init_line = proc.stdout.readline()
+        if not init_line:
+            raise RuntimeError("No response to initialize")
+
+        # Send the actual request
+        proc.stdin.write(json.dumps(request) + "\n")
+        proc.stdin.flush()
+        line = proc.stdout.readline()
+        if not line:
+            raise RuntimeError("No response from subprocess")
+        return json.loads(line)
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
@@ -30,22 +68,34 @@ class BridgeHandler(BaseHTTPRequestHandler):
             self._reply(400, {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None})
             return
 
-        with proc_lock:
-            if proc is None or proc.poll() is not None:
-                self._reply(502, {"jsonrpc": "2.0", "error": {"code": -32000, "message": "Subprocess not running"}, "id": request.get("id")})
-                return
+        method = request.get("method", "")
+
+        # Intercept initialize — we handle it internally per-request
+        if method == "initialize":
+            proc = subprocess.Popen(
+                COMMAND, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, text=True, bufsize=1,
+            )
             try:
                 proc.stdin.write(json.dumps(request) + "\n")
                 proc.stdin.flush()
                 line = proc.stdout.readline()
-                if not line:
-                    raise RuntimeError("Empty response from subprocess")
-                response = json.loads(line)
-            except Exception as exc:
-                self._reply(502, {"jsonrpc": "2.0", "error": {"code": -32000, "message": str(exc)}, "id": request.get("id")})
-                return
+                self._reply(200, json.loads(line) if line else {})
+            finally:
+                proc.terminate()
+                proc.wait(timeout=5)
+            return
 
-        self._reply(200, response)
+        # Skip notifications (no id = no response expected)
+        if "id" not in request:
+            self._reply(200, {})
+            return
+
+        try:
+            response = _call_mcp(request)
+            self._reply(200, response)
+        except Exception as exc:
+            self._reply(502, {"jsonrpc": "2.0", "error": {"code": -32000, "message": str(exc)}, "id": request.get("id")})
 
     def _reply(self, status: int, body: dict):
         payload = json.dumps(body).encode()
@@ -60,38 +110,17 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
 
 def main():
+    global COMMAND
     parser = argparse.ArgumentParser(description="HTTP-to-stdio MCP bridge")
     parser.add_argument("--port", type=int, default=9876, help="Port to listen on (default: 9876)")
-    parser.add_argument("--command", default="node /Applications/HomeClaw.app/Contents/Resources/mcp-server.js", help="Subprocess command (default: node mcp-server.js)")
+    parser.add_argument("--command", default="/opt/homebrew/bin/node /Applications/HomeClaw.app/Contents/Resources/mcp-server.js",
+                        help="Subprocess command (default: node mcp-server.js)")
     args = parser.parse_args()
-
-    global proc
-    proc = subprocess.Popen(
-        args.command.split(),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=sys.stderr,
-        text=True,
-        bufsize=1,
-    )
-    print(f"[bridge] Subprocess started: {args.command}", file=sys.stderr)
+    COMMAND = args.command.split()
 
     server = HTTPServer(("127.0.0.1", args.port), BridgeHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    print(f"[bridge] Listening on http://127.0.0.1:{args.port}", file=sys.stderr)
-
-    def shutdown(signum, frame):
-        print(f"[bridge] Shutting down (signal {signum})", file=sys.stderr)
-        server.shutdown()
-        if proc and proc.poll() is None:
-            proc.terminate()
-            proc.wait(timeout=5)
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, shutdown)
-    signal.signal(signal.SIGINT, shutdown)
-    signal.pause()
+    print(f"[bridge] Listening on http://127.0.0.1:{args.port}", file=sys.stderr, flush=True)
+    server.serve_forever()
 
 
 if __name__ == "__main__":
