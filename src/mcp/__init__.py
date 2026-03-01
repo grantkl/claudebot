@@ -27,4 +27,11 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
 
         servers["homekit"] = create_sdk_mcp_server(name="homekit", version="1.0.0", tools=HOMEKIT_TOOLS)
 
+    gmail_creds = os.environ.get("GMAIL_CREDENTIALS_FILE")
+    gmail_token = os.environ.get("GMAIL_TOKEN_FILE")
+    if gmail_creds and gmail_token:
+        from .gmail_server import GMAIL_TOOLS
+
+        servers["gmail"] = create_sdk_mcp_server(name="gmail", version="1.0.0", tools=GMAIL_TOOLS)
+
     return servers

@@ -503,3 +503,150 @@ class TestClaudeManager:
         with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
             await manager.send_message("t1", "hello")
         assert manager.is_authorized_session("t1") is False
+
+    @pytest.mark.asyncio
+    async def test_superuser_flag_stored_on_session(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello", superuser=True)
+        assert manager.is_superuser_session("t1") is True
+
+    @pytest.mark.asyncio
+    async def test_is_superuser_session_returns_false_by_default(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello")
+        assert manager.is_superuser_session("t1") is False
+
+    @pytest.mark.asyncio
+    async def test_is_superuser_session_returns_none_for_missing(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        assert manager.is_superuser_session("nonexistent") is None
+
+    @pytest.mark.asyncio
+    async def test_mcp_server_names_filters_servers(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"sonos": "sonos_srv", "homekit": "hk_srv", "gmail": "gmail_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"sonos", "homekit"})
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert options.mcp_servers == {"sonos": "sonos_srv", "homekit": "hk_srv"}
+
+    @pytest.mark.asyncio
+    async def test_mcp_server_names_none_gives_no_servers(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"sonos": "sonos_srv", "homekit": "hk_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names=None)
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert options.mcp_servers == {}
+
+    @pytest.mark.asyncio
+    async def test_mcp_server_names_empty_set_gives_no_servers(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"sonos": "sonos_srv", "homekit": "hk_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names=set())
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert options.mcp_servers == {}
+
+    @pytest.mark.asyncio
+    async def test_gmail_system_prompt_included_when_gmail_in_mcp_server_names(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"gmail": "gmail_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"gmail"}, authorized=True)
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "Gmail capabilities" in options.system_prompt
+        assert "CANNOT send emails" in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_partial_mcp_access_gets_hide_prompt(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"sonos": "sonos_srv", "gmail": "gmail_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"sonos"}, authorized=True)
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "You have access to Gmail capabilities" not in options.system_prompt
+        assert "You only have the tools explicitly provided to you" in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_no_mcp_access_gets_hide_prompt(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"sonos": "sonos_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names=set(), authorized=False)
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "You only have the tools explicitly provided to you" in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_full_mcp_access_gets_no_hide_prompt(self):
+        config = _make_config(enable_mcp=True)
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"sonos": "sonos_srv", "homekit": "hk_srv", "gmail": "gmail_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"sonos", "homekit", "gmail"}, authorized=True, superuser=True)
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "You only have the tools explicitly provided" not in options.system_prompt
+        assert "You have access to Gmail capabilities" in options.system_prompt

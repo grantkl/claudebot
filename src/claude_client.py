@@ -28,6 +28,7 @@ class SessionEntry:
     client: ClaudeSDKClient
     last_accessed: float
     authorized: bool = False
+    superuser: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -64,14 +65,23 @@ class ClaudeManager:
             return None
         return entry.authorized
 
+    def is_superuser_session(self, thread_ts: str) -> bool | None:
+        entry = self._sessions.get(thread_ts)
+        if entry is None:
+            return None
+        return entry.superuser
+
     async def remove_session(self, thread_ts: str) -> None:
         await self._remove_session(thread_ts)
 
-    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, include_mcp: bool = True, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False) -> str:
+    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False) -> str:
         is_new_session = thread_ts not in self._sessions
         if is_new_session:
             system_prompt = self._config.claude_system_prompt
-            mcp_servers = self._mcp_servers if include_mcp else {}
+            if mcp_server_names:
+                mcp_servers = {k: v for k, v in self._mcp_servers.items() if k in mcp_server_names}
+            else:
+                mcp_servers = {}
             if mcp_servers:
                 if os.environ.get("HOMECLAW_MCP_URL"):
                     system_prompt += (
@@ -86,11 +96,18 @@ class ClaudeManager:
                         "\n\nYou have access to smart home capabilities via MCP tools."
                         " You can control Sonos speakers and HomeKit devices."
                     )
-            if not authorized:
+            if mcp_server_names and "gmail" in mcp_server_names:
                 system_prompt += (
-                    "\n\nDo not mention or reference any smart home, IoT, Sonos, HomeKit,"
-                    " or MCP capabilities. You do not have access to any such tools."
-                    " If asked about controlling devices, say you cannot help with that."
+                    "\n\nYou have access to Gmail capabilities via MCP tools."
+                    " You can list, search, and read emails, and mark them as read."
+                    " You CANNOT send emails."
+                )
+            if set(mcp_servers) != set(self._mcp_servers):
+                system_prompt += (
+                    "\n\nYou only have the tools explicitly provided to you."
+                    " Do not mention, reference, or suggest any capabilities beyond"
+                    " what your available tools provide. If asked about capabilities"
+                    " you do not have, say you cannot help with that."
                 )
             client = ClaudeSDKClient(
                 options=ClaudeAgentOptions(
@@ -103,7 +120,8 @@ class ClaudeManager:
             )
             await client.connect()
             self._sessions[thread_ts] = SessionEntry(
-                client=client, last_accessed=time.time(), authorized=authorized
+                client=client, last_accessed=time.time(), authorized=authorized,
+                superuser=superuser,
             )
 
         query_text = text

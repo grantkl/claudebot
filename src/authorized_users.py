@@ -4,3 +4,8 @@
 def is_authorized(user_id: str, authorized: set[str]) -> bool:
     """Check whether a user is in the authorized set. O(1) set lookup."""
     return user_id in authorized
+
+
+def is_superuser(user_id: str, superuser_ids: set[str]) -> bool:
+    """Check whether a user is in the superuser set. O(1) set lookup."""
+    return user_id in superuser_ids

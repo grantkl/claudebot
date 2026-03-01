@@ -21,6 +21,9 @@ class Config:
     sonos_speaker_ips: list[str] = field(default_factory=list)
     rate_limit_messages: int = 0
     rate_limit_window_seconds: int = 3600
+    superuser_ids: set[str] = field(default_factory=set)
+    gmail_credentials_file: str = ""
+    gmail_token_file: str = ""
 
 
 def load_config() -> Config:
@@ -50,6 +53,11 @@ def load_config() -> Config:
         uid.strip() for uid in authorized_raw.split(",") if uid.strip()
     }
 
+    superuser_raw = os.environ.get("SUPERUSER_IDS", "")
+    superuser_ids = {
+        uid.strip() for uid in superuser_raw.split(",") if uid.strip()
+    }
+
     return Config(
         slack_bot_token=slack_bot_token,
         slack_app_token=slack_app_token,
@@ -71,4 +79,7 @@ def load_config() -> Config:
         ],
         rate_limit_messages=int(os.environ.get("RATE_LIMIT_MESSAGES", "0")),
         rate_limit_window_seconds=int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "3600")),
+        superuser_ids=superuser_ids,
+        gmail_credentials_file=os.environ.get("GMAIL_CREDENTIALS_FILE", ""),
+        gmail_token_file=os.environ.get("GMAIL_TOKEN_FILE", ""),
     )

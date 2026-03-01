@@ -129,3 +129,60 @@ class TestLoadConfig:
     def test_empty_authorized_user_ids_results_in_empty_set(self):
         cfg = load_config()
         assert cfg.authorized_user_ids == set()
+
+    @patch.dict(
+        "os.environ",
+        {**REQUIRED_ENV, "SUPERUSER_IDS": "U100,U200"},
+        clear=True,
+    )
+    def test_superuser_ids_parsed_into_set(self):
+        cfg = load_config()
+        assert isinstance(cfg.superuser_ids, set)
+        assert cfg.superuser_ids == {"U100", "U200"}
+
+    @patch.dict(
+        "os.environ",
+        {**REQUIRED_ENV, "SUPERUSER_IDS": " U100 , U200 , U300 "},
+        clear=True,
+    )
+    def test_superuser_ids_strips_whitespace(self):
+        cfg = load_config()
+        assert cfg.superuser_ids == {"U100", "U200", "U300"}
+
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_missing_superuser_ids_results_in_empty_set(self):
+        cfg = load_config()
+        assert cfg.superuser_ids == set()
+
+    @patch.dict(
+        "os.environ",
+        {**REQUIRED_ENV, "SUPERUSER_IDS": ""},
+        clear=True,
+    )
+    def test_empty_superuser_ids_results_in_empty_set(self):
+        cfg = load_config()
+        assert cfg.superuser_ids == set()
+
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_default_gmail_credentials_file(self):
+        cfg = load_config()
+        assert cfg.gmail_credentials_file == ""
+
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_default_gmail_token_file(self):
+        cfg = load_config()
+        assert cfg.gmail_token_file == ""
+
+    @patch.dict(
+        "os.environ",
+        {
+            **REQUIRED_ENV,
+            "GMAIL_CREDENTIALS_FILE": "/path/to/creds.json",
+            "GMAIL_TOKEN_FILE": "/path/to/token.json",
+        },
+        clear=True,
+    )
+    def test_gmail_file_overrides(self):
+        cfg = load_config()
+        assert cfg.gmail_credentials_file == "/path/to/creds.json"
+        assert cfg.gmail_token_file == "/path/to/token.json"

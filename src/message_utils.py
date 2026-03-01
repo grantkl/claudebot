@@ -69,7 +69,7 @@ def format_error_message(error: Exception) -> str:
     return "I encountered an error processing your request. Please try again."
 
 
-def format_thread_context(messages: list[dict], bot_user_id: str) -> str:
+def format_thread_context(messages: list[dict[str, str]], bot_user_id: str) -> str:
     """Format Slack thread messages into a context block for Claude.
 
     Messages from the bot (matched by user ID or bot_id field) are labeled

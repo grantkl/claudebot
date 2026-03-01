@@ -37,6 +37,7 @@ def _make_config(**overrides):
     cfg = MagicMock()
     cfg.slack_bot_token = overrides.get("slack_bot_token", "xoxb-test")
     cfg.authorized_user_ids = overrides.get("authorized_user_ids", {"U001"})
+    cfg.superuser_ids = overrides.get("superuser_ids", set())
     return cfg
 
 
@@ -121,8 +122,8 @@ class TestSlackApp:
         # Claude called with stripped text and sonnet model for authorized user
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", include_mcp=True, images=None,
-            disallowed_tools=None, authorized=True,
+            model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
+            disallowed_tools=None, authorized=True, superuser=False,
         )
 
         # Response posted
@@ -211,8 +212,8 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", include_mcp=True, images=None,
-            disallowed_tools=None, authorized=True,
+            model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
+            disallowed_tools=None, authorized=True, superuser=False,
         )
         rate_limiter.check_and_record.assert_not_called()
 
@@ -239,9 +240,9 @@ class TestSlackApp:
         rate_limiter.check_and_record.assert_called_once_with("U001")
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="haiku", include_mcp=False, images=None,
+            model="haiku", mcp_server_names=set(), images=None,
             disallowed_tools=["Bash"],
-            authorized=False,
+            authorized=False, superuser=False,
         )
 
     @pytest.mark.asyncio
@@ -369,8 +370,8 @@ class TestSlackApp:
         client.conversations_replies.assert_not_called()
         claude_manager.send_message.assert_called_once_with(
             "parent_ts", "follow up", thread_context=None,
-            model="sonnet", include_mcp=True, images=None,
-            disallowed_tools=None, authorized=True,
+            model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
+            disallowed_tools=None, authorized=True, superuser=False,
         )
 
     @pytest.mark.asyncio
@@ -707,9 +708,9 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="haiku", include_mcp=False, images=None,
+            model="haiku", mcp_server_names=set(), images=None,
             disallowed_tools=["Bash"],
-            authorized=False,
+            authorized=False, superuser=False,
         )
 
     @pytest.mark.asyncio
@@ -734,8 +735,8 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", include_mcp=True, images=None,
-            disallowed_tools=None, authorized=True,
+            model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
+            disallowed_tools=None, authorized=True, superuser=False,
         )
 
     @pytest.mark.asyncio
@@ -763,9 +764,9 @@ class TestSlackApp:
         claude_manager.remove_session.assert_called_once_with(event["ts"])
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="haiku", include_mcp=False, images=None,
+            model="haiku", mcp_server_names=set(), images=None,
             disallowed_tools=["Bash"],
-            authorized=False,
+            authorized=False, superuser=False,
         )
 
     @pytest.mark.asyncio
@@ -775,6 +776,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="response")
         claude_manager.has_session = MagicMock(return_value=True)
         claude_manager.is_authorized_session = MagicMock(return_value=True)
+        claude_manager.is_superuser_session = MagicMock(return_value=False)
         claude_manager.remove_session = AsyncMock()
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
@@ -791,3 +793,86 @@ class TestSlackApp:
         await handler(event=event, say=say, client=client)
 
         claude_manager.remove_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_superuser_gets_opus_and_all_mcp_servers(self):
+        config = _make_config(authorized_user_ids={"U001"}, superuser_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        rate_limiter = _make_rate_limiter()
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, rate_limiter)
+
+        event = _make_event(user="U001", text="<@B001> hello")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        claude_manager.send_message.assert_called_once_with(
+            event["ts"], "hello", thread_context=None,
+            model="opus", mcp_server_names={"sonos", "homekit", "gmail"}, images=None,
+            disallowed_tools=None, authorized=True, superuser=True,
+        )
+        rate_limiter.check_and_record.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_authorized_non_superuser_gets_sonnet_and_limited_mcp(self):
+        config = _make_config(authorized_user_ids={"U001"}, superuser_ids={"UOTHER"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        rate_limiter = _make_rate_limiter()
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, rate_limiter)
+
+        event = _make_event(user="U001", text="<@B001> hello")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        claude_manager.send_message.assert_called_once_with(
+            event["ts"], "hello", thread_context=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
+            disallowed_tools=None, authorized=True, superuser=False,
+        )
+
+    @pytest.mark.asyncio
+    async def test_non_superuser_evicts_superuser_session(self):
+        config = _make_config(authorized_user_ids={"U001"}, superuser_ids={"UOTHER"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.has_session = MagicMock(return_value=True)
+        claude_manager.is_authorized_session = MagicMock(return_value=True)
+        claude_manager.is_superuser_session = MagicMock(return_value=True)
+        claude_manager.remove_session = AsyncMock()
+        rate_limiter = _make_rate_limiter()
+        say = AsyncMock()
+        client = AsyncMock()
+        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+        client.reactions_add = AsyncMock()
+        client.reactions_remove = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, rate_limiter)
+
+        event = _make_event(user="U001", text="<@B001> hello")
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        claude_manager.remove_session.assert_called_once_with(event["ts"])
+        claude_manager.send_message.assert_called_once_with(
+            event["ts"], "hello", thread_context=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
+            disallowed_tools=None, authorized=True, superuser=False,
+        )

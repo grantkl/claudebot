@@ -9,6 +9,9 @@ dependencies = [
     "aiohttp>=3.9.0",
     "soco>=0.30.0",
     "aiohomekit>=3.2.0",
+    "google-api-python-client>=2.100.0",
+    "google-auth-oauthlib>=1.1.0",
+    "google-auth-httplib2>=0.2.0",
 ]
 
 [dependency-groups]
@@ -36,6 +39,12 @@ module = [
     "aiohomekit.*",
     "homekit",
     "homekit.*",
+    "google",
+    "google.*",
+    "google_auth_oauthlib",
+    "google_auth_oauthlib.*",
+    "googleapiclient",
+    "googleapiclient.*",
 ]
 ignore_missing_imports = true
 

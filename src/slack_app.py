@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from slack_bolt.async_app import AsyncApp
 
-from .authorized_users import is_authorized
+from .authorized_users import is_authorized, is_superuser
 from .claude_client import ClaudeManager
 from .config import Config
 from .message_utils import (
@@ -45,14 +45,22 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
 
         thread_ts = event.get("thread_ts") or event["ts"]
 
-        authorized = is_authorized(event["user"], config.authorized_user_ids)
+        superuser = is_superuser(event["user"], config.superuser_ids)
+        authorized = superuser or is_authorized(event["user"], config.authorized_user_ids)
         if not authorized:
             if not rate_limiter.check_and_record(event["user"]):
                 await say(text=RATE_LIMIT_MESSAGE, thread_ts=thread_ts)
                 return
 
-        model = "sonnet" if authorized else "haiku"
+        model = "opus" if superuser else ("sonnet" if authorized else "haiku")
         disallowed_tools = None if authorized else ["Bash"]
+
+        if superuser:
+            mcp_server_names: set[str] = {"sonos", "homekit", "gmail"}
+        elif authorized:
+            mcp_server_names = {"sonos", "homekit"}
+        else:
+            mcp_server_names = set()
 
         # Thread history hydration for cold sessions in existing threads
         thread_context: str | None = None
@@ -108,6 +116,8 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
 
         if not authorized and claude_manager.is_authorized_session(thread_ts):
             await claude_manager.remove_session(thread_ts)
+        elif authorized and not superuser and claude_manager.is_superuser_session(thread_ts):
+            await claude_manager.remove_session(thread_ts)
 
         await client.reactions_add(
             name="hourglass_flowing_sand",
@@ -118,10 +128,11 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         try:
             response = await claude_manager.send_message(
                 thread_ts, cleaned_text, thread_context=thread_context,
-                model=model, include_mcp=authorized,
+                model=model, mcp_server_names=mcp_server_names,
                 images=images if images else None,
                 disallowed_tools=disallowed_tools,
                 authorized=authorized,
+                superuser=superuser,
             )
 
             # Extract large code blocks and post as files
