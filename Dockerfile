@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 # Install Node.js 22 (needed because Agent SDK spawns Claude CLI as subprocess)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg gcc libffi-dev && \
     mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
@@ -26,6 +26,9 @@ RUN uv pip install --system --no-cache .
 # Copy application source
 COPY src/ src/
 
+# Copy vendored skyscanner library
+COPY vendor/skyscanner/ vendor/skyscanner/
+
 # Create non-root user and switch to it
 RUN useradd --create-home appuser
 
@@ -36,5 +39,7 @@ USER appuser
 
 ENV PYTHONUNBUFFERED=1
 ENV ENABLE_MCP=true
+
+ENV PYTHONPATH=/app/vendor/skyscanner
 
 CMD ["python", "-m", "src.main"]

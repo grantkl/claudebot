@@ -34,4 +34,10 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
 
         servers["gmail"] = create_sdk_mcp_server(name="gmail", version="1.0.0", tools=GMAIL_TOOLS)
 
+    flights_enabled = os.environ.get("FLIGHTS_ENABLED", "").lower() in ("1", "true", "yes")
+    if flights_enabled:
+        from .flights_server import FLIGHTS_TOOLS
+
+        servers["flights"] = create_sdk_mcp_server(name="flights", version="1.0.0", tools=FLIGHTS_TOOLS)
+
     return servers

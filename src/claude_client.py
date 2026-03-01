@@ -108,6 +108,13 @@ class ClaudeManager:
                     " You can list, add, update, remove, pause, resume, and trigger"
                     " scheduled autonomous tasks."
                 )
+            if mcp_server_names and "flights" in mcp_server_names:
+                system_prompt += (
+                    "\n\nYou have access to flight search capabilities via MCP tools."
+                    " You can search for airports and search for flights between airports."
+                    " Flight searches may take 10-30 seconds. Dates must be future ISO 8601 (YYYY-MM-DD)."
+                    " You can also use 'anytime' for flexible date searches and 'everywhere' for open destination searches."
+                )
             if set(mcp_servers) != set(self._mcp_servers):
                 system_prompt += (
                     "\n\nYou only have the tools explicitly provided to you."

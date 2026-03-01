@@ -49,9 +49,9 @@ Three tiers, determined by `SUPERUSER_IDS` and `AUTHORIZED_USER_IDS` env vars. N
 
 | Tier | Model | MCP Servers | Blocked Tools | Rate Limited |
 |---|---|---|---|---|
-| Superuser | opus | sonos + homekit + gmail + scheduler | None | No |
-| Authorized | sonnet | sonos + homekit | Bash, Read, Edit, Write, Glob, Grep | No |
-| Everyone else | haiku | None | Bash, Read, Edit, Write, Glob, Grep | Yes |
+| Superuser | opus | sonos + homekit + gmail + scheduler + flights | None | No |
+| Authorized | sonnet | sonos + homekit + flights | Bash, Read, Edit, Write, Glob, Grep | No |
+| Everyone else | haiku | flights | Bash, Read, Edit, Write, Glob, Grep | Yes |
 
 **Security:** Non-superuser tiers have filesystem tools blocked to prevent capability discovery (e.g., reading source code to find that Gmail MCP exists). When a session has fewer MCP servers than what's available globally, a generic system prompt instructs Claude not to mention or suggest unavailable capabilities. Session eviction prevents a lower-tier user from inheriting a higher-tier session in the same thread.
 
@@ -71,6 +71,7 @@ When `ENABLE_MCP=true`, MCP servers are built once at startup and selectively in
 - **HomeKit** — always loaded; controls HomeKit devices via pairing data from a JSON file (or HomeClaw HTTP bridge if `HOMECLAW_MCP_URL` is set)
 - **Gmail** — conditionally loaded when both `GMAIL_CREDENTIALS_FILE` and `GMAIL_TOKEN_FILE` are set; read-only (list, search, read, mark-as-read — no send). Superuser-only. OAuth setup: `python scripts/gmail-auth.py`
 - **Scheduler** — conditionally loaded when `SCHEDULER_ENABLED=true`; manages autonomous background tasks (email digests, smart home routines, custom prompts) on cron schedules or polling intervals. Superuser-only. Tasks defined in `config/tasks.yaml`, state persisted in `data/scheduler_state.json`.
+- **Flights** — conditionally loaded when `FLIGHTS_ENABLED=true`; searches airports and flight prices via reverse-engineered Skyscanner API. Available to all tiers. Supports flexible date searches with "anytime" and open destination with "everywhere".
 
 ### Autonomous Task Scheduler
 
@@ -121,3 +122,7 @@ Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional
 - `SCHEDULER_STATE_FILE` — path to state JSON file (default `data/scheduler_state.json`)
 - `SCHEDULER_CONCURRENCY` — max concurrent task executions (default `3`)
 - `SCHEDULER_TIMEZONE` — timezone for cron schedules (default `US/Pacific`)
+- `FLIGHTS_ENABLED` — set to `true` to enable the Skyscanner flight search MCP
+- `SKYSCANNER_LOCALE` — locale for flight search results (default `en-US`)
+- `SKYSCANNER_CURRENCY` — currency for prices (default `USD`)
+- `SKYSCANNER_MARKET` — market for search results (default `US`)

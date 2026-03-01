@@ -602,6 +602,40 @@ class TestClaudeManager:
         assert "CANNOT send emails" in options.system_prompt
 
     @pytest.mark.asyncio
+    async def test_flights_system_prompt_included_when_flights_in_mcp_server_names(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"flights": "flights_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"flights"})
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "flight search capabilities" in options.system_prompt
+        assert "anytime" in options.system_prompt
+        assert "everywhere" in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_flights_prompt_not_included_without_flights(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"sonos": "sonos_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"sonos"})
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "flight search" not in options.system_prompt
+
+    @pytest.mark.asyncio
     async def test_partial_mcp_access_gets_hide_prompt(self):
         config = _make_config()
         manager = ClaudeManager(config)
