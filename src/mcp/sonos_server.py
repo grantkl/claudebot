@@ -571,7 +571,7 @@ async def sonos_play_apple_music(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Export all tools
 # ---------------------------------------------------------------------------
-SONOS_TOOLS: list[SdkMcpTool] = [  # type: ignore[type-arg]
+SONOS_TOOLS: list[SdkMcpTool] = [
     sonos_discover,
     sonos_get_state,
     sonos_play,

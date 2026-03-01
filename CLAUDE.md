@@ -14,8 +14,8 @@ pytest tests/test_slack_app.py
 # Run a single test
 pytest tests/test_slack_app.py::TestSlackApp::test_successful_message_flow
 
-# Type checking (strict mode)
-mypy src/
+# Type checking
+ty check src/
 
 # Run the bot locally via Docker
 docker compose up -d --build
@@ -49,7 +49,7 @@ Three tiers, determined by `SUPERUSER_IDS` and `AUTHORIZED_USER_IDS` env vars. N
 
 | Tier | Model | MCP Servers | Blocked Tools | Rate Limited |
 |---|---|---|---|---|
-| Superuser | opus | sonos + homekit + gmail | None | No |
+| Superuser | opus | sonos + homekit + gmail + scheduler | None | No |
 | Authorized | sonnet | sonos + homekit | Bash, Read, Edit, Write, Glob, Grep | No |
 | Everyone else | haiku | None | Bash, Read, Edit, Write, Glob, Grep | Yes |
 
@@ -70,6 +70,30 @@ When `ENABLE_MCP=true`, MCP servers are built once at startup and selectively in
 - **Sonos** — always loaded; controls Sonos speakers via configured IPs or network discovery
 - **HomeKit** — always loaded; controls HomeKit devices via pairing data from a JSON file (or HomeClaw HTTP bridge if `HOMECLAW_MCP_URL` is set)
 - **Gmail** — conditionally loaded when both `GMAIL_CREDENTIALS_FILE` and `GMAIL_TOKEN_FILE` are set; read-only (list, search, read, mark-as-read — no send). Superuser-only. OAuth setup: `python scripts/gmail-auth.py`
+- **Scheduler** — conditionally loaded when `SCHEDULER_ENABLED=true`; manages autonomous background tasks (email digests, smart home routines, custom prompts) on cron schedules or polling intervals. Superuser-only. Tasks defined in `config/tasks.yaml`, state persisted in `data/scheduler_state.json`.
+
+### Autonomous Task Scheduler
+
+When `SCHEDULER_ENABLED=true`, a background scheduler runs tasks on cron or interval schedules. Tasks execute via `ClaudeManager.send_message()` with full MCP server access and deliver results as Slack DMs to superusers.
+
+**Task YAML schema** (`config/tasks.yaml`):
+```yaml
+tasks:
+  - id: unique_task_id
+    name: "Human-readable name"
+    prompt: |
+      The prompt sent to Claude when the task fires.
+      End with NOTHING_TO_REPORT sentinel to suppress empty DMs.
+    cron: "0 7 * * *"           # OR interval_seconds: 300
+    mcp_servers: [gmail, homekit]
+    output: dm                   # "dm" or "silent"
+    model: sonnet                 # opus/sonnet/haiku
+    enabled: true
+```
+
+**Management:** Superusers can manage tasks via Slack conversation using scheduler MCP tools (`scheduler_list_tasks`, `scheduler_add_task`, `scheduler_update_task`, `scheduler_remove_task`, `scheduler_pause_task`, `scheduler_resume_task`, `scheduler_trigger_task`, `scheduler_reload`).
+
+**Circuit breaker:** Tasks that fail 5 consecutive times are auto-paused with a DM notification.
 
 ## Testing Conventions
 
@@ -92,3 +116,8 @@ Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional
 - `AUTHORIZED_USER_IDS` — comma-separated Slack user IDs for authorized (sonnet) access
 - `SUPERUSER_IDS` — comma-separated Slack user IDs for superuser (opus + gmail) access; must also be in `AUTHORIZED_USER_IDS` or they'll be auto-promoted
 - `GMAIL_CREDENTIALS_FILE` / `GMAIL_TOKEN_FILE` — paths to Google OAuth2 credentials and token files for Gmail MCP
+- `SCHEDULER_ENABLED` — set to `true` to enable the autonomous task scheduler
+- `SCHEDULER_TASKS_FILE` — path to tasks YAML file (default `config/tasks.yaml`)
+- `SCHEDULER_STATE_FILE` — path to state JSON file (default `data/scheduler_state.json`)
+- `SCHEDULER_CONCURRENCY` — max concurrent task executions (default `3`)
+- `SCHEDULER_TIMEZONE` — timezone for cron schedules (default `US/Pacific`)

@@ -819,7 +819,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="opus", mcp_server_names={"sonos", "homekit", "gmail"}, images=None,
+            model="opus", mcp_server_names={"sonos", "homekit", "gmail", "scheduler"}, images=None,
             disallowed_tools=None, authorized=True, superuser=True,
         )
         rate_limiter.check_and_record.assert_not_called()

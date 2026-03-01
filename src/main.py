@@ -24,6 +24,24 @@ async def main() -> None:
     manager = ClaudeManager(config)
     await manager.start()
 
+    scheduler = None
+    if config.scheduler_enabled:
+        from .scheduler import TaskScheduler
+
+        scheduler = TaskScheduler(
+            config, manager, config.slack_bot_token,
+            config.scheduler_tasks_file, config.scheduler_state_file,
+        )
+        if config.enable_mcp:
+            from .mcp.scheduler_server import SCHEDULER_TOOLS, set_scheduler
+            from claude_agent_sdk import create_sdk_mcp_server
+
+            set_scheduler(scheduler)
+            manager._mcp_servers["scheduler"] = create_sdk_mcp_server(
+                name="scheduler", version="1.0.0", tools=SCHEDULER_TOOLS,
+            )
+        await scheduler.start()
+
     rate_limiter = RateLimiter(config.rate_limit_messages, config.rate_limit_window_seconds)
     app = create_app(config, manager, rate_limiter)
     handler = AsyncSocketModeHandler(app, config.slack_app_token)
@@ -32,8 +50,10 @@ async def main() -> None:
 
     async def shutdown() -> None:
         logger.info("Shutting down...")
+        if scheduler is not None:
+            await scheduler.stop()
         await manager.stop()
-        await handler.close_async()  # type: ignore[no-untyped-call]
+        await handler.close_async()
         loop.stop()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -42,7 +62,7 @@ async def main() -> None:
         )
 
     logger.info("ClaudeBot started successfully")
-    await handler.start_async()  # type: ignore[no-untyped-call]
+    await handler.start_async()
 
 
 if __name__ == "__main__":

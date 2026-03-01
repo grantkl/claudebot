@@ -102,6 +102,12 @@ class ClaudeManager:
                     " You can list, search, and read emails, and mark them as read."
                     " You CANNOT send emails."
                 )
+            if mcp_server_names and "scheduler" in mcp_server_names:
+                system_prompt += (
+                    "\n\nYou have access to a task scheduler via MCP tools."
+                    " You can list, add, update, remove, pause, resume, and trigger"
+                    " scheduled autonomous tasks."
+                )
             if set(mcp_servers) != set(self._mcp_servers):
                 system_prompt += (
                     "\n\nYou only have the tools explicitly provided to you."

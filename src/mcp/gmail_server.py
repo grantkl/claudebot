@@ -32,7 +32,7 @@ def _get_gmail_service() -> Any:
     creds_file = os.environ["GMAIL_CREDENTIALS_FILE"]
     token_file = os.environ["GMAIL_TOKEN_FILE"]
 
-    creds = Credentials.from_authorized_user_file(  # type: ignore[no-untyped-call]
+    creds = Credentials.from_authorized_user_file(
         token_file,
         scopes=["https://www.googleapis.com/auth/gmail.modify"],
     )
@@ -240,7 +240,7 @@ async def gmail_mark_as_read(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Export all tools
 # ---------------------------------------------------------------------------
-GMAIL_TOOLS: list[SdkMcpTool] = [  # type: ignore[type-arg]
+GMAIL_TOOLS: list[SdkMcpTool] = [
     gmail_list_emails,
     gmail_get_email,
     gmail_mark_as_read,

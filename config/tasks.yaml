@@ -1,0 +1,48 @@
+tasks:
+  - id: morning_email_digest
+    name: "Morning Email Digest"
+    prompt: |
+      Check my Gmail inbox for unread emails received in the last 12 hours.
+      Summarize each email in 1-2 sentences, grouped by sender importance.
+      If there are no unread emails, respond with NOTHING_TO_REPORT.
+    cron: "0 7 * * *"
+    mcp_servers: [gmail]
+    output: dm
+    model: sonnet
+    enabled: true
+
+  - id: important_email_alert
+    name: "Important Email Alert"
+    prompt: |
+      Check my Gmail for unread emails from the last 5 minutes.
+      Only report emails that appear urgent or from important contacts.
+      If nothing important, respond with NOTHING_TO_REPORT.
+    interval_seconds: 300
+    mcp_servers: [gmail]
+    output: dm
+    model: haiku
+    enabled: true
+
+  - id: morning_smart_home
+    name: "Morning Smart Home Routine"
+    prompt: |
+      Execute the morning routine:
+      1. Set living room and kitchen lights to 80% brightness, warm white
+      2. Set thermostat to 72F
+      Report what you've done.
+    cron: "30 6 * * 1-5"
+    mcp_servers: [homekit, sonos]
+    output: dm
+    model: sonnet
+    enabled: false
+
+  - id: evening_wind_down
+    name: "Evening Wind Down"
+    prompt: |
+      Dim all lights to 30% and set thermostat to 68F.
+      Report what you've done.
+    cron: "0 22 * * *"
+    mcp_servers: [homekit]
+    output: dm
+    model: sonnet
+    enabled: false

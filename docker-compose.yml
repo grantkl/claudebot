@@ -16,6 +16,8 @@ services:
       - ~/.homekit_pairings.json:/home/appuser/.homekit_pairings.json:ro
       - ${GMAIL_CREDENTIALS_FILE:-/dev/null}:/home/appuser/gmail_credentials.json:ro
       - ${GMAIL_TOKEN_FILE:-/dev/null}:/home/appuser/gmail_token.json:rw
+      - ./config:/app/config:ro
+      - ./data:/app/data:rw
     environment:
       - ENABLE_MCP=true
       - SONOS_SPEAKER_IPS=${SONOS_SPEAKER_IPS}
@@ -25,3 +27,7 @@ services:
       - SUPERUSER_IDS=${SUPERUSER_IDS}
       - GMAIL_CREDENTIALS_FILE=/home/appuser/gmail_credentials.json
       - GMAIL_TOKEN_FILE=/home/appuser/gmail_token.json
+      - SCHEDULER_ENABLED=${SCHEDULER_ENABLED:-false}
+      - SCHEDULER_TASKS_FILE=/app/config/tasks.yaml
+      - SCHEDULER_STATE_FILE=/app/data/scheduler_state.json
+      - SCHEDULER_TIMEZONE=${SCHEDULER_TIMEZONE:-US/Pacific}

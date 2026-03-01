@@ -59,7 +59,7 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             disallowed_tools = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 
         if superuser:
-            mcp_server_names: set[str] = {"sonos", "homekit", "gmail"}
+            mcp_server_names: set[str] = {"sonos", "homekit", "gmail", "scheduler"}
         elif authorized:
             mcp_server_names = {"sonos", "homekit"}
         else:

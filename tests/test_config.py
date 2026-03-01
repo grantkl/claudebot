@@ -186,3 +186,50 @@ class TestLoadConfig:
         cfg = load_config()
         assert cfg.gmail_credentials_file == "/path/to/creds.json"
         assert cfg.gmail_token_file == "/path/to/token.json"
+
+
+class TestSchedulerConfig:
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_default_scheduler_enabled(self):
+        cfg = load_config()
+        assert cfg.scheduler_enabled is False
+
+    @patch.dict("os.environ", {**REQUIRED_ENV, "SCHEDULER_ENABLED": "true"}, clear=True)
+    def test_scheduler_enabled_true(self):
+        cfg = load_config()
+        assert cfg.scheduler_enabled is True
+
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_default_scheduler_tasks_file(self):
+        cfg = load_config()
+        assert cfg.scheduler_tasks_file == "config/tasks.yaml"
+
+    @patch.dict("os.environ", {**REQUIRED_ENV, "SCHEDULER_TASKS_FILE": "/custom/tasks.yaml"}, clear=True)
+    def test_scheduler_tasks_file_override(self):
+        cfg = load_config()
+        assert cfg.scheduler_tasks_file == "/custom/tasks.yaml"
+
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_default_scheduler_state_file(self):
+        cfg = load_config()
+        assert cfg.scheduler_state_file == "data/scheduler_state.json"
+
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_default_scheduler_concurrency(self):
+        cfg = load_config()
+        assert cfg.scheduler_concurrency == 3
+
+    @patch.dict("os.environ", {**REQUIRED_ENV, "SCHEDULER_CONCURRENCY": "5"}, clear=True)
+    def test_scheduler_concurrency_override(self):
+        cfg = load_config()
+        assert cfg.scheduler_concurrency == 5
+
+    @patch.dict("os.environ", REQUIRED_ENV, clear=True)
+    def test_default_scheduler_timezone(self):
+        cfg = load_config()
+        assert cfg.scheduler_timezone == "US/Pacific"
+
+    @patch.dict("os.environ", {**REQUIRED_ENV, "SCHEDULER_TIMEZONE": "US/Eastern"}, clear=True)
+    def test_scheduler_timezone_override(self):
+        cfg = load_config()
+        assert cfg.scheduler_timezone == "US/Eastern"

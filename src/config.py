@@ -24,6 +24,11 @@ class Config:
     superuser_ids: set[str] = field(default_factory=set)
     gmail_credentials_file: str = ""
     gmail_token_file: str = ""
+    scheduler_enabled: bool = False
+    scheduler_tasks_file: str = "config/tasks.yaml"
+    scheduler_state_file: str = "data/scheduler_state.json"
+    scheduler_concurrency: int = 3
+    scheduler_timezone: str = "US/Pacific"
 
 
 def load_config() -> Config:
@@ -82,4 +87,9 @@ def load_config() -> Config:
         superuser_ids=superuser_ids,
         gmail_credentials_file=os.environ.get("GMAIL_CREDENTIALS_FILE", ""),
         gmail_token_file=os.environ.get("GMAIL_TOKEN_FILE", ""),
+        scheduler_enabled=os.environ.get("SCHEDULER_ENABLED", "").lower() in ("1", "true", "yes"),
+        scheduler_tasks_file=os.environ.get("SCHEDULER_TASKS_FILE", "config/tasks.yaml"),
+        scheduler_state_file=os.environ.get("SCHEDULER_STATE_FILE", "data/scheduler_state.json"),
+        scheduler_concurrency=int(os.environ.get("SCHEDULER_CONCURRENCY", "3")),
+        scheduler_timezone=os.environ.get("SCHEDULER_TIMEZONE", "US/Pacific"),
     )

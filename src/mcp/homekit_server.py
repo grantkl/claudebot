@@ -514,7 +514,7 @@ async def homekit_trigger_scene(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
-HOMEKIT_TOOLS: list[SdkMcpTool] = [  # type: ignore[type-arg]
+HOMEKIT_TOOLS: list[SdkMcpTool] = [
     homekit_list_pairings,
     homekit_list_devices,
     homekit_get_accessory,

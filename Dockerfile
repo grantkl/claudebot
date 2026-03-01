@@ -28,6 +28,10 @@ COPY src/ src/
 
 # Create non-root user and switch to it
 RUN useradd --create-home appuser
+
+# Create directories for scheduler config and state
+RUN mkdir -p /app/config /app/data && chown -R appuser:appuser /app/config /app/data
+
 USER appuser
 
 ENV PYTHONUNBUFFERED=1
