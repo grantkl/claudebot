@@ -32,6 +32,9 @@ sys.modules.setdefault("httpx", MagicMock())
 from src.rate_limiter import RATE_LIMIT_MESSAGE as RL_MESSAGE  # noqa: E402
 from src.slack_app import create_app  # noqa: E402
 
+# Non-superuser tiers block filesystem tools to prevent capability discovery
+_NON_SUPERUSER_DISALLOWED = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
+
 
 def _make_config(**overrides):
     cfg = MagicMock()
@@ -123,7 +126,7 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
-            disallowed_tools=None, authorized=True, superuser=False,
+            disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
         )
 
         # Response posted
@@ -213,7 +216,7 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
-            disallowed_tools=None, authorized=True, superuser=False,
+            disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
         )
         rate_limiter.check_and_record.assert_not_called()
 
@@ -241,7 +244,7 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="haiku", mcp_server_names=set(), images=None,
-            disallowed_tools=["Bash"],
+            disallowed_tools=_NON_SUPERUSER_DISALLOWED,
             authorized=False, superuser=False,
         )
 
@@ -371,7 +374,7 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             "parent_ts", "follow up", thread_context=None,
             model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
-            disallowed_tools=None, authorized=True, superuser=False,
+            disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
         )
 
     @pytest.mark.asyncio
@@ -687,7 +690,7 @@ class TestSlackApp:
         assert "[Code uploaded as file:" in say_text
 
     @pytest.mark.asyncio
-    async def test_unauthorized_user_gets_disallowed_tools(self):
+    async def test_unauthorized_user_gets_filesystem_tools_blocked(self):
         config = _make_config(authorized_user_ids={"UOTHER"})
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value="response")
@@ -709,12 +712,12 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="haiku", mcp_server_names=set(), images=None,
-            disallowed_tools=["Bash"],
+            disallowed_tools=_NON_SUPERUSER_DISALLOWED,
             authorized=False, superuser=False,
         )
 
     @pytest.mark.asyncio
-    async def test_authorized_user_gets_no_disallowed_tools(self):
+    async def test_authorized_non_superuser_gets_filesystem_tools_blocked(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value="response")
@@ -736,7 +739,7 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
-            disallowed_tools=None, authorized=True, superuser=False,
+            disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
         )
 
     @pytest.mark.asyncio
@@ -765,7 +768,7 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="haiku", mcp_server_names=set(), images=None,
-            disallowed_tools=["Bash"],
+            disallowed_tools=_NON_SUPERUSER_DISALLOWED,
             authorized=False, superuser=False,
         )
 
@@ -844,7 +847,7 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
-            disallowed_tools=None, authorized=True, superuser=False,
+            disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
         )
 
     @pytest.mark.asyncio
@@ -874,5 +877,5 @@ class TestSlackApp:
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="sonnet", mcp_server_names={"sonos", "homekit"}, images=None,
-            disallowed_tools=None, authorized=True, superuser=False,
+            disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
         )

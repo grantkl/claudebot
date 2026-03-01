@@ -36,16 +36,24 @@ docker compose logs -f claudebot
 ```
 Slack Event (mention or DM)
   → slack_app._handle_message()
-  → Authorization check (is_authorized)
-  → If not authorized: rate limit check → haiku model
-  → If authorized: skip rate limit → sonnet model
-  → ClaudeManager.send_message(thread_ts, text, model)
+  → Three-tier auth check (is_superuser → is_authorized → everyone)
+  → If not authorized: rate limit check
+  → Session eviction if tier mismatch (lower-tier user in higher-tier thread)
+  → ClaudeManager.send_message(thread_ts, text, model, mcp_server_names, disallowed_tools)
   → Response split at 3900 chars → Slack reply
 ```
 
 ### Tiered Access Model
 
-Users in `AUTHORIZED_USER_IDS` get the sonnet model with no rate limiting. Everyone else gets haiku with sliding-window rate limiting. Nobody is rejected outright.
+Three tiers, determined by `SUPERUSER_IDS` and `AUTHORIZED_USER_IDS` env vars. Nobody is rejected outright.
+
+| Tier | Model | MCP Servers | Blocked Tools | Rate Limited |
+|---|---|---|---|---|
+| Superuser | opus | sonos + homekit + gmail | None | No |
+| Authorized | sonnet | sonos + homekit | Bash, Read, Edit, Write, Glob, Grep | No |
+| Everyone else | haiku | None | Bash, Read, Edit, Write, Glob, Grep | Yes |
+
+**Security:** Non-superuser tiers have filesystem tools blocked to prevent capability discovery (e.g., reading source code to find that Gmail MCP exists). When a session has fewer MCP servers than what's available globally, a generic system prompt instructs Claude not to mention or suggest unavailable capabilities. Session eviction prevents a lower-tier user from inheriting a higher-tier session in the same thread.
 
 ### Per-Thread Sessions
 
@@ -57,7 +65,11 @@ In Docker, an nginx sidecar (`auth-proxy`) injects real credentials into outboun
 
 ### MCP Integrations
 
-When `ENABLE_MCP=true`, HomeKit and Sonos MCP servers are built once at startup and injected into all Claude sessions. HomeKit uses pairing data from a JSON file; Sonos uses configured IPs or network discovery.
+When `ENABLE_MCP=true`, MCP servers are built once at startup and selectively injected into Claude sessions based on user tier. Available servers:
+
+- **Sonos** — always loaded; controls Sonos speakers via configured IPs or network discovery
+- **HomeKit** — always loaded; controls HomeKit devices via pairing data from a JSON file (or HomeClaw HTTP bridge if `HOMECLAW_MCP_URL` is set)
+- **Gmail** — conditionally loaded when both `GMAIL_CREDENTIALS_FILE` and `GMAIL_TOKEN_FILE` are set; read-only (list, search, read, mark-as-read — no send). Superuser-only. OAuth setup: `python scripts/gmail-auth.py`
 
 ## Testing Conventions
 
@@ -75,4 +87,8 @@ Use `AsyncMock` for async methods, `MagicMock` for sync. Config is mocked via `_
 
 ## Configuration
 
-Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional. See `.env.example` for the full list. `AUTHORIZED_USER_IDS` is a comma-separated list of Slack user IDs for tier-1 (sonnet) access.
+Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional. See `.env.example` for the full list.
+
+- `AUTHORIZED_USER_IDS` — comma-separated Slack user IDs for authorized (sonnet) access
+- `SUPERUSER_IDS` — comma-separated Slack user IDs for superuser (opus + gmail) access; must also be in `AUTHORIZED_USER_IDS` or they'll be auto-promoted
+- `GMAIL_CREDENTIALS_FILE` / `GMAIL_TOKEN_FILE` — paths to Google OAuth2 credentials and token files for Gmail MCP

@@ -53,7 +53,10 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                 return
 
         model = "opus" if superuser else ("sonnet" if authorized else "haiku")
-        disallowed_tools = None if authorized else ["Bash"]
+        if superuser:
+            disallowed_tools = None
+        else:
+            disallowed_tools = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 
         if superuser:
             mcp_server_names: set[str] = {"sonos", "homekit", "gmail"}

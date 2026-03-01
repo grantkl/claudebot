@@ -636,7 +636,7 @@ class TestClaudeManager:
 
     @pytest.mark.asyncio
     async def test_full_mcp_access_gets_no_hide_prompt(self):
-        config = _make_config(enable_mcp=True)
+        config = _make_config()
         manager = ClaudeManager(config)
         manager._mcp_servers = {"sonos": "sonos_srv", "homekit": "hk_srv", "gmail": "gmail_srv"}
         fake_client = _FakeClaudeSDKClient()
