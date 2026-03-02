@@ -620,6 +620,23 @@ class TestClaudeManager:
         assert "search-flights" in options.system_prompt
 
     @pytest.mark.asyncio
+    async def test_flight_watch_system_prompt_included(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"flight_watch": "fw_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"flight_watch"})
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "flight price watch tools" in options.system_prompt
+        assert "flight_watch_add" in options.system_prompt
+
+    @pytest.mark.asyncio
     async def test_flights_prompt_not_included_without_flights(self):
         config = _make_config()
         manager = ClaudeManager(config)

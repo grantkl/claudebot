@@ -46,3 +46,27 @@ tasks:
     output: dm
     model: sonnet
     enabled: false
+
+  - id: flight_price_checker
+    name: "Flight Price Watch Checker"
+    prompt: |
+      Check flight prices for all active flight watches.
+      1. Call flight_watch_list() to get all active watches.
+      2. If no active watches, respond with NOTHING_TO_REPORT.
+      3. For each watch, call search-flights with origin, destination, departure_date
+         (and return_date if set). Use 1 adult passenger.
+      4. If the watch has "airline" or "flight_numbers" set, filter the search results
+         to match only that airline/flight number(s). Record the price for the matching
+         flight, not the overall cheapest. If the specific flight isn't found in results,
+         note that in the report.
+      5. For each result, call flight_watch_record() with the price found.
+      6. Compare current price to previous price and max_price (booked price):
+         - If the watch has max_price and current price < max_price, ALWAYS report it
+           (the user can re-book at a lower price).
+         - Otherwise, report if price dropped >10% from previous check.
+      7. Summarize only noteworthy changes. If none, respond with NOTHING_TO_REPORT.
+    cron: "0 */6 * * *"
+    mcp_servers: [flights, flight_watch]
+    output: dm
+    model: sonnet
+    enabled: true

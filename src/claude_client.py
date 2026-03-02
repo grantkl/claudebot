@@ -115,6 +115,16 @@ class ClaudeManager:
                     " flight-inspiration (cheapest destinations), airport-routes (direct routes),"
                     " and nearest-airports. Dates must be future ISO 8601 (YYYY-MM-DD)."
                 )
+            if mcp_server_names and "flight_watch" in mcp_server_names:
+                system_prompt += (
+                    "\n\nYou have access to flight price watch tools via MCP."
+                    " You can add watches for specific routes and dates (flight_watch_add),"
+                    " or track a specific booked flight by including airline and flight_numbers."
+                    " When a user says they booked a flight, use max_price as the price they paid."
+                    " List active watches (flight_watch_list), view price history"
+                    " (flight_watch_history), and remove watches (flight_watch_remove)."
+                    " Price checks run automatically every 6 hours via the scheduler."
+                )
             if set(mcp_servers) != set(self._mcp_servers):
                 system_prompt += (
                     "\n\nYou only have the tools explicitly provided to you."

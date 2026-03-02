@@ -63,4 +63,9 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
                 },
             }
 
+        from .flight_watch_server import FLIGHT_WATCH_TOOLS
+        servers["flight_watch"] = create_sdk_mcp_server(
+            name="flight_watch", version="1.0.0", tools=FLIGHT_WATCH_TOOLS
+        )
+
     return servers

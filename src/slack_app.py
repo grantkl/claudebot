@@ -59,11 +59,11 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             disallowed_tools = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 
         if superuser:
-            mcp_server_names: set[str] = {"sonos", "homekit", "gmail", "scheduler", "flights"}
+            mcp_server_names: set[str] = {"sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch"}
         elif authorized:
-            mcp_server_names = {"sonos", "homekit", "flights"}
+            mcp_server_names = {"sonos", "homekit", "flights", "flight_watch"}
         else:
-            mcp_server_names = {"flights"}
+            mcp_server_names = set()
 
         # Thread history hydration for cold sessions in existing threads
         thread_context: str | None = None

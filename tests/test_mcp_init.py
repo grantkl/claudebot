@@ -12,6 +12,7 @@ sys.modules.setdefault("claude_agent_sdk", MagicMock())
 sys.modules.setdefault("src.mcp.sonos_server", MagicMock())
 sys.modules.setdefault("src.mcp.homekit_server", MagicMock())
 sys.modules.setdefault("src.mcp.gmail_server", MagicMock())
+sys.modules.setdefault("src.mcp.flight_watch_server", MagicMock())
 
 from src.mcp import _resolve_amadeus_path, build_mcp_servers  # noqa: E402
 
@@ -47,6 +48,20 @@ class TestBuildMcpServersFlights:
         os.environ.pop("FLIGHTS_ENABLED", None)
         servers = build_mcp_servers()
         assert "flights" not in servers
+
+
+class TestBuildMcpServersFlightWatch:
+    @patch("src.mcp._resolve_amadeus_path", return_value="/some/path/index.js")
+    @patch.dict("os.environ", {"FLIGHTS_ENABLED": "true", "AMADEUS_CLIENT_ID": "id", "AMADEUS_CLIENT_SECRET": "secret"}, clear=False)
+    def test_flight_watch_registered_when_flights_enabled(self, mock_resolve):
+        servers = build_mcp_servers()
+        assert "flight_watch" in servers
+
+    @patch("src.mcp._resolve_amadeus_path", return_value="/some/path/index.js")
+    @patch.dict("os.environ", {"FLIGHTS_ENABLED": "false"}, clear=False)
+    def test_flight_watch_not_registered_when_flights_disabled(self, mock_resolve):
+        servers = build_mcp_servers()
+        assert "flight_watch" not in servers
 
 
 class TestResolveAmadeusPath:
