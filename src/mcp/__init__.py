@@ -3,14 +3,29 @@
 from __future__ import annotations
 
 import os
+import subprocess as _subprocess
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from claude_agent_sdk import McpServerConfig
 
 
+def _resolve_amadeus_path() -> str | None:
+    """Resolve the path to the amadeus MCP server's stdio entry point."""
+    try:
+        result = _subprocess.run(
+            ["node", "-e", "console.log(require.resolve('@privilegemendes/amadeus-mcp-server/dist/index.js'))"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (FileNotFoundError, _subprocess.TimeoutExpired):
+        pass
+    return None
+
+
 def build_mcp_servers() -> dict[str, McpServerConfig]:
-    """Build all in-process MCP server configurations."""
+    """Build all MCP server configurations."""
     from claude_agent_sdk import create_sdk_mcp_server
 
     from .sonos_server import SONOS_TOOLS
@@ -36,8 +51,16 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
 
     flights_enabled = os.environ.get("FLIGHTS_ENABLED", "").lower() in ("1", "true", "yes")
     if flights_enabled:
-        from .flights_server import FLIGHTS_TOOLS
-
-        servers["flights"] = create_sdk_mcp_server(name="flights", version="1.0.0", tools=FLIGHTS_TOOLS)
+        amadeus_path = _resolve_amadeus_path()
+        if amadeus_path:
+            servers["flights"] = {
+                "type": "stdio",
+                "command": "node",
+                "args": [amadeus_path],
+                "env": {
+                    "AMADEUS_CLIENT_ID": os.environ.get("AMADEUS_CLIENT_ID", ""),
+                    "AMADEUS_CLIENT_SECRET": os.environ.get("AMADEUS_CLIENT_SECRET", ""),
+                },
+            }
 
     return servers

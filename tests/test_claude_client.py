@@ -616,8 +616,8 @@ class TestClaudeManager:
         call_kwargs = mock_cls.call_args
         options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
         assert "flight search capabilities" in options.system_prompt
-        assert "anytime" in options.system_prompt
-        assert "everywhere" in options.system_prompt
+        assert "Amadeus API" in options.system_prompt
+        assert "search-flights" in options.system_prompt
 
     @pytest.mark.asyncio
     async def test_flights_prompt_not_included_without_flights(self):

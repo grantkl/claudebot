@@ -1,3 +1,0 @@
-[submodule "vendor/skyscanner"]
-	path = vendor/skyscanner
-	url = https://github.com/irrisolto/skyscanner.git

@@ -13,6 +13,7 @@ RUN apt-get update && \
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @privilegemendes/amadeus-mcp-server
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -26,9 +27,6 @@ RUN uv pip install --system --no-cache .
 # Copy application source
 COPY src/ src/
 
-# Copy vendored skyscanner library
-COPY vendor/skyscanner/ vendor/skyscanner/
-
 # Create non-root user and switch to it
 RUN useradd --create-home appuser
 
@@ -39,7 +37,5 @@ USER appuser
 
 ENV PYTHONUNBUFFERED=1
 ENV ENABLE_MCP=true
-
-ENV PYTHONPATH=/app/vendor/skyscanner
 
 CMD ["python", "-m", "src.main"]
