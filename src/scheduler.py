@@ -34,6 +34,7 @@ class TaskDefinition:
     output: str = "dm"  # "dm" or "silent"
     model: str = "sonnet"
     enabled: bool = True
+    run_once: bool = False
 
 
 @dataclass
@@ -90,6 +91,7 @@ class TaskScheduler:
                 output=task_data.get("output", "dm"),
                 model=task_data.get("model", "sonnet"),
                 enabled=task_data.get("enabled", True),
+                run_once=task_data.get("run_once", False),
             )
             self._tasks[task.id] = task
         logger.info("Loaded %d tasks from %s", len(self._tasks), self._tasks_file)
@@ -202,6 +204,12 @@ class TaskScheduler:
             if task.output == "dm" and NOTHING_TO_REPORT not in response:
                 await self._send_dm(response, task.name)
 
+            # Auto-disable one-time tasks after successful execution
+            if task.run_once:
+                task.enabled = False
+                self._save_tasks()
+                logger.info("One-time task %s auto-disabled after execution", task_id)
+
             logger.info("Task %s completed successfully", task_id)
         except Exception:
             logger.exception("Task %s failed", task_id)
@@ -284,6 +292,7 @@ class TaskScheduler:
                 "model": task.model,
                 "mcp_servers": task.mcp_servers,
                 "output": task.output,
+                "run_once": task.run_once,
             })
         return result
 
@@ -303,6 +312,7 @@ class TaskScheduler:
             "output": task.output,
             "model": task.model,
             "enabled": task.enabled,
+            "run_once": task.run_once,
             "paused": state.paused,
             "last_run": state.last_run_time,
             "consecutive_failures": state.consecutive_failures,
@@ -320,6 +330,7 @@ class TaskScheduler:
             output=task_data.get("output", "dm"),
             model=task_data.get("model", "sonnet"),
             enabled=task_data.get("enabled", True),
+            run_once=task_data.get("run_once", False),
         )
         self._tasks[task.id] = task
         self._save_tasks()
@@ -399,6 +410,8 @@ class TaskScheduler:
             task_dict["output"] = task.output
             task_dict["model"] = task.model
             task_dict["enabled"] = task.enabled
+            if task.run_once:
+                task_dict["run_once"] = True
             tasks_data.append(task_dict)
         with open(path, "w") as f:
             yaml.dump({"tasks": tasks_data}, f, default_flow_style=False, sort_keys=False)

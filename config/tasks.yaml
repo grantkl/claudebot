@@ -16,17 +16,15 @@ tasks:
   enabled: true
 - id: important_email_alert
   name: Important Email Alert
-  prompt: |
-    1. List unread emails with gmail_list_emails(query="is:unread", max_results=10).
-    2. If no results, respond with NOTHING_TO_REPORT.
-    3. Collect the message IDs and call gmail_check_alerted(message_ids=[...]).
-       This returns only IDs that have NOT been alerted before.
-    4. If no new IDs, respond with NOTHING_TO_REPORT.
-    5. For each new ID, check if the email is TIME-SENSITIVE — meaning it has
-       a deadline, expiring offer, limited-time window, upcoming event, or
-       required action with a due date.
-    6. Skip newsletters, digests, marketing without deadlines, routine notifications.
-    7. Report only time-sensitive new emails. If none qualify, respond with NOTHING_TO_REPORT.
+  prompt: "1. List unread emails with gmail_list_emails(query=\"is:unread\", max_results=10).\n\
+    2. If no results, respond with NOTHING_TO_REPORT.\n3. Collect the message IDs\
+    \ and call gmail_check_alerted(message_ids=[...]).\n   This returns only IDs that\
+    \ have NOT been alerted before.\n4. If no new IDs, respond with NOTHING_TO_REPORT.\n\
+    5. For each new ID, check if the email is TIME-SENSITIVE \u2014 meaning it has\n\
+    \   a deadline, expiring offer, limited-time window, upcoming event, or\n   required\
+    \ action with a due date.\n6. Skip newsletters, digests, marketing without deadlines,\
+    \ routine notifications.\n7. Report only time-sensitive new emails. If none qualify,\
+    \ respond with NOTHING_TO_REPORT.\n"
   interval_seconds: 300
   mcp_servers:
   - gmail
@@ -97,3 +95,13 @@ tasks:
   output: dm
   model: haiku
   enabled: true
+- id: found_north_lottery_reminder
+  name: Found North Lottery Signup Reminder
+  prompt: Send a DM reminding the user to sign up for the Found North lottery today.
+    Keep it brief and friendly.
+  cron: 0 17 3 3 *
+  mcp_servers: []
+  output: dm
+  model: sonnet
+  enabled: true
+  run_once: true
