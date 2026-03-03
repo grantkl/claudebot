@@ -1,72 +1,95 @@
 tasks:
-  - id: morning_email_digest
-    name: "Morning Email Digest"
-    prompt: |
-      Check my Gmail inbox for unread emails received in the last 12 hours.
-      Summarize each email in 1-2 sentences, grouped by sender importance.
-      If there are no unread emails, respond with NOTHING_TO_REPORT.
-    cron: "0 7 * * *"
-    mcp_servers: [gmail]
-    output: dm
-    model: sonnet
-    enabled: true
+- id: morning_email_digest
+  name: Morning Email Digest
+  prompt: 'Check my Gmail inbox for unread emails received in the last 12 hours.
 
-  - id: important_email_alert
-    name: "Important Email Alert"
-    prompt: |
-      Check my Gmail for unread emails from the last 5 minutes.
-      Only report emails that appear urgent or from important contacts.
-      If nothing important, respond with NOTHING_TO_REPORT.
-    interval_seconds: 300
-    mcp_servers: [gmail]
-    output: dm
-    model: haiku
-    enabled: true
+    Summarize each email in 1-2 sentences, grouped by sender importance.
 
-  - id: morning_smart_home
-    name: "Morning Smart Home Routine"
-    prompt: |
-      Execute the morning routine:
-      1. Set living room and kitchen lights to 80% brightness, warm white
-      2. Set thermostat to 72F
-      Report what you've done.
-    cron: "30 6 * * 1-5"
-    mcp_servers: [homekit, sonos]
-    output: dm
-    model: sonnet
-    enabled: false
+    If there are no unread emails, respond with NOTHING_TO_REPORT.
 
-  - id: evening_wind_down
-    name: "Evening Wind Down"
-    prompt: |
-      Dim all lights to 30% and set thermostat to 68F.
-      Report what you've done.
-    cron: "0 22 * * *"
-    mcp_servers: [homekit]
-    output: dm
-    model: sonnet
-    enabled: false
+    '
+  cron: 0 7 * * *
+  mcp_servers:
+  - gmail
+  output: dm
+  model: sonnet
+  enabled: true
+- id: important_email_alert
+  name: Important Email Alert
+  prompt: "Check my Gmail for unread emails received in the last 5 minutes (use\n\
+    after: and before: search filters with today's date).\nOnly report emails that\
+    \ are TIME-SENSITIVE \u2014 meaning they have a deadline,\nexpiring offer, limited-time\
+    \ window, upcoming event, required action with\na due date, or something that\
+    \ will be missed if not acted on soon.\nSkip everything else: newsletters, digests,\
+    \ marketing without deadlines,\nroutine notifications, etc.\nIf nothing time-sensitive,\
+    \ respond with NOTHING_TO_REPORT.\n"
+  interval_seconds: 300
+  mcp_servers:
+  - gmail
+  output: dm
+  model: haiku
+  enabled: true
+- id: morning_smart_home
+  name: Morning Smart Home Routine
+  prompt: 'Execute the morning routine:
 
-  - id: flight_price_checker
-    name: "Flight Price Watch Checker"
-    prompt: |
-      Check flight prices for all active flight watches.
-      1. Call flight_watch_list() to get all active watches.
-      2. If no active watches, respond with NOTHING_TO_REPORT.
-      3. For each watch, call search-flights with origin, destination, departure_date
-         (and return_date if set). Use 1 adult passenger.
-      4. If the watch has "airline" or "flight_numbers" set, filter the search results
-         to match only that airline/flight number(s). Record the price for the matching
-         flight, not the overall cheapest. If the specific flight isn't found in results,
-         note that in the report.
-      5. For each result, call flight_watch_record() with the price found.
-      6. Compare current price to previous price and max_price (booked price):
-         - If the watch has max_price and current price < max_price, ALWAYS report it
-           (the user can re-book at a lower price).
-         - Otherwise, report if price dropped >10% from previous check.
-      7. Summarize only noteworthy changes. If none, respond with NOTHING_TO_REPORT.
-    cron: "0 */6 * * *"
-    mcp_servers: [flights, flight_watch]
-    output: dm
-    model: sonnet
-    enabled: true
+    1. Set living room and kitchen lights to 80% brightness, warm white
+
+    2. Set thermostat to 72F
+
+    Report what you''ve done.
+
+    '
+  cron: 30 6 * * 1-5
+  mcp_servers:
+  - homekit
+  - sonos
+  output: dm
+  model: sonnet
+  enabled: false
+- id: evening_wind_down
+  name: Evening Wind Down
+  prompt: 'Dim all lights to 30% and set thermostat to 68F.
+
+    Report what you''ve done.
+
+    '
+  cron: 0 22 * * *
+  mcp_servers:
+  - homekit
+  output: dm
+  model: sonnet
+  enabled: false
+- id: flight_price_checker
+  name: Flight Price Watch Checker
+  prompt: "Check flight prices for all active flight watches.\n1. Call flight_watch_list()\
+    \ to get all active watches.\n2. If no active watches, respond with NOTHING_TO_REPORT.\n\
+    3. For each watch, call search-flights with origin, destination, departure_date\n\
+    \   (and return_date if set). Use 1 adult passenger.\n4. If the watch has \"airline\"\
+    \ or \"flight_numbers\" set, filter the search results\n   to match only that\
+    \ airline/flight number(s). Record the price for the matching\n   flight, not\
+    \ the overall cheapest. If the specific flight isn't found in results,\n   note\
+    \ that in the report.\n5. For each result, call flight_watch_record() with the\
+    \ price found.\n6. Compare current price to previous price and max_price (booked\
+    \ price):\n   - If the watch has max_price and current price < max_price, ALWAYS\
+    \ report it\n     (the user can re-book at a lower price).\n   - Otherwise, report\
+    \ if price dropped >10% from previous check.\n7. Summarize only noteworthy changes.\
+    \ If none, respond with NOTHING_TO_REPORT.\n"
+  cron: 0 */6 * * *
+  mcp_servers:
+  - flights
+  - flight_watch
+  output: dm
+  model: sonnet
+  enabled: true
+- id: weather_kingston_wa
+  name: Kingston WA Weather Check
+  prompt: 'Search the web for the current weather in Kingston, Washington. Provide
+    a concise summary including: current temperature, conditions (sunny, cloudy, rain,
+    etc.), high/low for the day, and any notable weather alerts or upcoming changes
+    in the forecast. Keep it brief and conversational.'
+  cron: 0 15 * * 1-5
+  mcp_servers: []
+  output: dm
+  model: haiku
+  enabled: true
