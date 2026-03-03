@@ -38,7 +38,6 @@ importlib.reload(seats_aero_server)
 
 # Access underlying async handlers
 _award_search = seats_aero_server.award_search.handler
-_award_search_live = seats_aero_server.award_search_live.handler
 _award_trip_details = seats_aero_server.award_trip_details.handler
 
 
@@ -146,8 +145,8 @@ class TestAwardSearch:
 
         # Verify uppercase conversion in params
         call_kwargs = client.get.call_args
-        assert call_kwargs.kwargs["params"]["origin"] == "SEA"
-        assert call_kwargs.kwargs["params"]["destination"] == "NRT"
+        assert call_kwargs.kwargs["params"]["origin_airport"] == "SEA"
+        assert call_kwargs.kwargs["params"]["destination_airport"] == "NRT"
 
     async def test_empty_results(self):
         client = _make_client("get", _mock_response(200, {"data": []}))
@@ -195,12 +194,12 @@ class TestAwardSearch:
                 })
 
         params = client.get.call_args.kwargs["params"]
-        assert params["cabin"] == "business"
+        assert params["cabins"] == "business"
         assert params["start_date"] == "2026-06-01"
         assert params["end_date"] == "2026-06-30"
         assert params["take"] == "50"
 
-    async def test_take_capped_at_100(self):
+    async def test_take_capped_at_1000(self):
         client = _make_client("get", _mock_response(200, {"data": []}))
 
         with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
@@ -208,11 +207,11 @@ class TestAwardSearch:
                 await _award_search({
                     "origin": "SEA",
                     "destination": "NRT",
-                    "take": 500,
+                    "take": 5000,
                 })
 
         params = client.get.call_args.kwargs["params"]
-        assert params["take"] == "100"
+        assert params["take"] == "1000"
 
     async def test_http_401(self):
         client = _make_client("get", _mock_response(401))
@@ -278,182 +277,6 @@ class TestAwardSearch:
         assert _is_error(result)
         assert "Invalid cabin" in _parse_text(result)
 
-
-# ---------------------------------------------------------------------------
-# TestAwardSearchLive
-# ---------------------------------------------------------------------------
-class TestAwardSearchLive:
-    async def test_missing_api_key(self):
-        with patch.dict("os.environ", {}, clear=True):
-            result = await _award_search_live({
-                "origin": "SEA",
-                "destination": "NRT",
-                "date": "2026-06-10",
-                "source": "united",
-            })
-        assert _is_error(result)
-        assert "SEATS_AERO_API_KEY" in _parse_text(result)
-
-    async def test_successful_live_search(self):
-        client = _make_client("post", _mock_response(200, _sample_availability(1)))
-
-        with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
-            with patch("src.mcp.seats_aero_server.httpx.AsyncClient", return_value=client):
-                result = await _award_search_live({
-                    "origin": "sea",
-                    "destination": "nrt",
-                    "date": "2026-06-10",
-                    "source": "united",
-                })
-
-        assert not _is_error(result)
-        text = _parse_text(result)
-        assert "Found 1 result(s)" in text
-        assert "SEA-NRT" in text
-
-        # Verify uppercase conversion and correct payload
-        call_kwargs = client.post.call_args
-        payload = call_kwargs.kwargs["json"]
-        assert payload["origin"] == "SEA"
-        assert payload["destination"] == "NRT"
-        assert payload["source"] == "united"
-        assert payload["date"] == "2026-06-10"
-
-    async def test_invalid_source(self):
-        with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
-            result = await _award_search_live({
-                "origin": "SEA",
-                "destination": "NRT",
-                "date": "2026-06-10",
-                "source": "invalidprogram",
-            })
-        assert _is_error(result)
-        assert "Invalid source" in _parse_text(result)
-        assert "invalidprogram" in _parse_text(result)
-
-    async def test_source_case_insensitive(self):
-        client = _make_client("post", _mock_response(200, {"data": []}))
-
-        with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
-            with patch("src.mcp.seats_aero_server.httpx.AsyncClient", return_value=client):
-                result = await _award_search_live({
-                    "origin": "SEA",
-                    "destination": "NRT",
-                    "date": "2026-06-10",
-                    "source": "United",
-                })
-
-        assert not _is_error(result)
-
-    async def test_with_cabin(self):
-        client = _make_client("post", _mock_response(200, {"data": []}))
-
-        with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
-            with patch("src.mcp.seats_aero_server.httpx.AsyncClient", return_value=client):
-                result = await _award_search_live({
-                    "origin": "SEA",
-                    "destination": "NRT",
-                    "date": "2026-06-10",
-                    "source": "united",
-                    "cabin": "business",
-                })
-
-        assert not _is_error(result)
-        payload = client.post.call_args.kwargs["json"]
-        assert payload["cabin"] == "business"
-
-    async def test_invalid_cabin(self):
-        with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
-            result = await _award_search_live({
-                "origin": "SEA",
-                "destination": "NRT",
-                "date": "2026-06-10",
-                "source": "united",
-                "cabin": "luxury",
-            })
-        assert _is_error(result)
-        assert "Invalid cabin" in _parse_text(result)
-
-    async def test_uses_60s_timeout(self):
-        client = _make_client("post", _mock_response(200, {"data": []}))
-
-        with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
-            with patch("src.mcp.seats_aero_server.httpx.AsyncClient", return_value=client) as mock_cls:
-                await _award_search_live({
-                    "origin": "SEA",
-                    "destination": "NRT",
-                    "date": "2026-06-10",
-                    "source": "united",
-                })
-
-        # The AsyncClient should be instantiated with timeout=60
-        mock_cls.assert_called_once_with(timeout=60)
-
-    async def test_http_401(self):
-        client = _make_client("post", _mock_response(401))
-
-        with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
-            with patch("src.mcp.seats_aero_server.httpx.AsyncClient", return_value=client):
-                result = await _award_search_live({
-                    "origin": "SEA",
-                    "destination": "NRT",
-                    "date": "2026-06-10",
-                    "source": "united",
-                })
-
-        assert _is_error(result)
-        assert "Invalid API key" in _parse_text(result)
-
-    async def test_http_429(self):
-        client = _make_client("post", _mock_response(429))
-
-        with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
-            with patch("src.mcp.seats_aero_server.httpx.AsyncClient", return_value=client):
-                result = await _award_search_live({
-                    "origin": "SEA",
-                    "destination": "NRT",
-                    "date": "2026-06-10",
-                    "source": "united",
-                })
-
-        assert _is_error(result)
-        assert "Rate limited" in _parse_text(result)
-
-    async def test_timeout_mentions_60s(self):
-        import httpx as real_httpx
-
-        client = _make_client("post", side_effect=real_httpx.TimeoutException("timeout"))
-
-        with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
-            with patch("src.mcp.seats_aero_server.httpx.AsyncClient", return_value=client):
-                result = await _award_search_live({
-                    "origin": "SEA",
-                    "destination": "NRT",
-                    "date": "2026-06-10",
-                    "source": "united",
-                })
-
-        assert _is_error(result)
-        text = _parse_text(result)
-        assert "timed out" in text.lower()
-        assert "60s" in text
-
-    async def test_connection_error(self):
-        import httpx as real_httpx
-
-        client = _make_client("post", side_effect=real_httpx.ConnectError("refused"))
-
-        with patch.dict("os.environ", {"SEATS_AERO_API_KEY": "test-key"}):
-            with patch("src.mcp.seats_aero_server.httpx.AsyncClient", return_value=client):
-                result = await _award_search_live({
-                    "origin": "SEA",
-                    "destination": "NRT",
-                    "date": "2026-06-10",
-                    "source": "united",
-                })
-
-        assert _is_error(result)
-        assert "Could not connect" in _parse_text(result)
 
 
 # ---------------------------------------------------------------------------
@@ -604,14 +427,13 @@ class TestFormatTrip:
 # TestExport
 # ---------------------------------------------------------------------------
 class TestSeatsAeroTools:
-    def test_exports_three_tools(self):
+    def test_exports_two_tools(self):
         tools = seats_aero_server.SEATS_AERO_TOOLS
-        assert len(tools) == 3
+        assert len(tools) == 2
 
     def test_tool_names(self):
         names = [t.__name__ for t in seats_aero_server.SEATS_AERO_TOOLS]
         assert "award_search" in names
-        assert "award_search_live" in names
         assert "award_trip_details" in names
 
 
@@ -619,12 +441,6 @@ class TestSeatsAeroTools:
 # TestValidConstants
 # ---------------------------------------------------------------------------
 class TestConstants:
-    def test_valid_sources_contains_key_programs(self):
-        assert "united" in seats_aero_server.VALID_SOURCES
-        assert "aeroplan" in seats_aero_server.VALID_SOURCES
-        assert "lifemiles" in seats_aero_server.VALID_SOURCES
-        assert "delta" in seats_aero_server.VALID_SOURCES
-
     def test_valid_cabins(self):
         assert "economy" in seats_aero_server.VALID_CABINS
         assert "business" in seats_aero_server.VALID_CABINS

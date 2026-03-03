@@ -130,8 +130,7 @@ class ClaudeManager:
                     "\n\nYou have access to award flight search via seats.aero MCP tools."
                     " Use award_search for cached multi-program availability searches"
                     " across 24 loyalty programs (flexible dates and routes)."
-                    " Use award_search_live for real-time single-route single-program searches"
-                    " (slower but current data). Use award_trip_details to get flight segments,"
+                    " Use award_trip_details to get flight segments,"
                     " times, and booking links for a specific result from a cached search."
                 )
             if set(mcp_servers) != set(self._mcp_servers):
