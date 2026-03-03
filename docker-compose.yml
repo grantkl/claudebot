@@ -16,7 +16,7 @@ services:
       - ~/.homekit_pairings.json:/home/appuser/.homekit_pairings.json:ro
       - ${GMAIL_CREDENTIALS_FILE:-/dev/null}:/home/appuser/gmail_credentials.json:ro
       - ${GMAIL_TOKEN_FILE:-/dev/null}:/home/appuser/gmail_token.json:rw
-      - ./config:/app/config:ro
+      - ./config:/app/config:rw
       - ./data:/app/data:rw
     environment:
       - ENABLE_MCP=true
