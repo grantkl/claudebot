@@ -238,10 +238,62 @@ async def gmail_mark_as_read(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 4. gmail_check_alerted — dedup helper for scheduled email alerts
+# ---------------------------------------------------------------------------
+_ALERTED_FILE_DEFAULT = "data/alerted_emails.json"
+_MAX_ALERTED_IDS = 500
+
+
+def _load_alerted() -> set[str]:
+    path = os.environ.get("GMAIL_ALERTED_FILE", _ALERTED_FILE_DEFAULT)
+    if os.path.exists(path):
+        with open(path) as f:
+            return set(json.load(f))
+    return set()
+
+
+def _save_alerted(ids: set[str]) -> None:
+    path = os.environ.get("GMAIL_ALERTED_FILE", _ALERTED_FILE_DEFAULT)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    # Keep only the most recent IDs to prevent unbounded growth
+    trimmed = sorted(ids)[-_MAX_ALERTED_IDS:]
+    with open(path, "w") as f:
+        json.dump(trimmed, f)
+
+
+@tool(
+    "gmail_check_alerted",
+    "Check which email IDs have already been alerted on, and mark new ones as alerted. Returns only the IDs that have NOT been alerted before (i.e., new emails to report).",
+    {
+        "type": "object",
+        "properties": {
+            "message_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of Gmail message IDs to check.",
+            },
+        },
+        "required": ["message_ids"],
+    },
+)
+async def gmail_check_alerted(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        message_ids = args["message_ids"]
+        alerted = _load_alerted()
+        new_ids = [mid for mid in message_ids if mid not in alerted]
+        alerted.update(new_ids)
+        _save_alerted(alerted)
+        return _text(json.dumps(new_ids))
+    except Exception as e:
+        return _error(f"Failed to check alerted emails: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Export all tools
 # ---------------------------------------------------------------------------
 GMAIL_TOOLS: list[SdkMcpTool] = [
     gmail_list_emails,
     gmail_get_email,
     gmail_mark_as_read,
+    gmail_check_alerted,
 ]
