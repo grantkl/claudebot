@@ -125,6 +125,15 @@ class ClaudeManager:
                     " (flight_watch_history), and remove watches (flight_watch_remove)."
                     " Price checks run automatically every 6 hours via the scheduler."
                 )
+            if mcp_server_names and "seats_aero" in mcp_server_names:
+                system_prompt += (
+                    "\n\nYou have access to award flight search via seats.aero MCP tools."
+                    " Use award_search for cached multi-program availability searches"
+                    " across 24 loyalty programs (flexible dates and routes)."
+                    " Use award_search_live for real-time single-route single-program searches"
+                    " (slower but current data). Use award_trip_details to get flight segments,"
+                    " times, and booking links for a specific result from a cached search."
+                )
             if set(mcp_servers) != set(self._mcp_servers):
                 system_prompt += (
                     "\n\nYou only have the tools explicitly provided to you."
