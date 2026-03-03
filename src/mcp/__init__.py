@@ -68,4 +68,11 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
             name="flight_watch", version="1.0.0", tools=FLIGHT_WATCH_TOOLS
         )
 
+    seats_aero_key = os.environ.get("SEATS_AERO_API_KEY", "")
+    if seats_aero_key:
+        from .seats_aero_server import SEATS_AERO_TOOLS
+        servers["seats_aero"] = create_sdk_mcp_server(
+            name="seats_aero", version="1.0.0", tools=SEATS_AERO_TOOLS
+        )
+
     return servers

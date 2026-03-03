@@ -49,7 +49,7 @@ Three tiers, determined by `SUPERUSER_IDS` and `AUTHORIZED_USER_IDS` env vars. N
 
 | Tier | Model | MCP Servers | Blocked Tools | Rate Limited |
 |---|---|---|---|---|
-| Superuser | opus | sonos + homekit + gmail + scheduler + flights + flight_watch | None | No |
+| Superuser | opus | sonos + homekit + gmail + scheduler + flights + flight_watch + seats_aero | None | No |
 | Authorized | sonnet | sonos + homekit + flights + flight_watch | Bash, Read, Edit, Write, Glob, Grep | No |
 | Everyone else | haiku | _(none)_ | Bash, Read, Edit, Write, Glob, Grep | Yes |
 
@@ -73,6 +73,7 @@ When `ENABLE_MCP=true`, MCP servers are built once at startup and selectively in
 - **Scheduler** — conditionally loaded when `SCHEDULER_ENABLED=true`; manages autonomous background tasks (email digests, smart home routines, custom prompts) on cron schedules or polling intervals. Superuser-only. Tasks defined in `config/tasks.yaml`, state persisted in `data/scheduler_state.json`.
 - **Flights** — conditionally loaded when `FLIGHTS_ENABLED=true`; subprocess stdio MCP server (`@privilegemendes/amadeus-mcp-server`) using the official Amadeus API. Available to superuser and authorized tiers (not free-tier users, since API calls have cost). Tools: search-flights, search-airports, flight-price-analysis, flight-inspiration, airport-routes, nearest-airports.
 - **Flight Watch** — conditionally loaded when `FLIGHTS_ENABLED=true`; manages flight price watches with automatic periodic checks. Supports both route-based watches (origin/destination on flexible dates) and specific flight tracking by airline and flight number for booked itineraries. Superuser and authorized tiers. Tools: flight_watch_add, flight_watch_list, flight_watch_remove, flight_watch_record, flight_watch_history.
+- **Seats Aero** — conditionally loaded when `SEATS_AERO_API_KEY` is set; searches award flight availability across 24 loyalty programs via the seats.aero Partner API. Independent of FLIGHTS_ENABLED. Superuser-only. Tools: award_search, award_search_live, award_trip_details.
 
 ### Autonomous Task Scheduler
 
@@ -127,3 +128,4 @@ Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional
 - `AMADEUS_CLIENT_ID` — Amadeus API client ID (from https://developers.amadeus.com/)
 - `AMADEUS_CLIENT_SECRET` — Amadeus API client secret
 - `FLIGHT_WATCH_FILE` — path to flight watch data file (default `data/flight_watches.json`)
+- `SEATS_AERO_API_KEY` — seats.aero Partner API key for award flight availability search
