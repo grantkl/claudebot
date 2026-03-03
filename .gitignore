@@ -14,4 +14,6 @@ build/
 *.swo
 .DS_Store
 .claude-container/
+.playwright-mcp/
 logs/
+data/
