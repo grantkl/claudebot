@@ -28,12 +28,13 @@ docker compose logs -f claudebot
 | `GMAIL_CREDENTIALS_FILE` + `GMAIL_TOKEN_FILE` | Gmail read-only access (superuser) | OAuth setup: `python scripts/gmail-auth.py` |
 | `SCHEDULER_ENABLED=true` | Autonomous cron/interval tasks | `SCHEDULER_TASKS_FILE`, `SCHEDULER_TIMEZONE` |
 | `FLIGHTS_ENABLED=true` | Flight search + price watches | `AMADEUS_CLIENT_ID`, `AMADEUS_CLIENT_SECRET` |
+| `SEATS_AERO_API_KEY` | Award flight availability search (superuser) | Partner API key from seats.aero |
 
 ## Features
 
 - Three-tier access control (superuser / authorized / everyone) with per-tier model and tool restrictions
 - Per-thread Claude sessions with automatic TTL eviction and session-level locking
-- MCP integrations: Sonos, HomeKit, Gmail (read-only), Amadeus flight search, flight price watches
+- MCP integrations: Sonos, HomeKit, Gmail (read-only), Amadeus flight search, flight price watches, seats.aero award search
 - Autonomous task scheduler with cron/interval triggers, circuit breaker, and Slack DM delivery
 - Docker auth proxy (nginx sidecar) keeps real API tokens out of the bot container
 - Session eviction prevents lower-tier users from inheriting higher-tier thread sessions
@@ -54,7 +55,7 @@ src/                    # application code
   claude_client.py      #   Claude Agent SDK session management
   config.py             #   env var parsing and configuration
   scheduler.py          #   autonomous task scheduler
-  mcp/                  #   MCP server implementations (sonos, homekit, gmail, flights, scheduler)
+  mcp/                  #   MCP server implementations (sonos, homekit, gmail, flights, scheduler, seats_aero)
 config/tasks.yaml       # scheduler task definitions
 data/                   # runtime state (scheduler, flight watches)
 proxy/                  # nginx auth-proxy config
