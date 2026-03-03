@@ -42,6 +42,13 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
 
         servers["homekit"] = create_sdk_mcp_server(name="homekit", version="1.0.0", tools=HOMEKIT_TOOLS)
 
+    scheduler_enabled = os.environ.get("SCHEDULER_ENABLED", "").lower() in ("1", "true", "yes")
+    if scheduler_enabled:
+        from .scheduler_server import SCHEDULER_TOOLS
+        servers["scheduler"] = create_sdk_mcp_server(
+            name="scheduler", version="1.0.0", tools=SCHEDULER_TOOLS
+        )
+
     gmail_creds = os.environ.get("GMAIL_CREDENTIALS_FILE")
     gmail_token = os.environ.get("GMAIL_TOKEN_FILE")
     if gmail_creds and gmail_token:
