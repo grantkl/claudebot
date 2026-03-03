@@ -16,31 +16,6 @@ BASE_URL = "https://seats.aero"
 
 VALID_CABINS = ("economy", "premiumeconomy", "business", "first")
 
-VALID_SOURCES = (
-    "eurobonus",
-    "virginatlantic",
-    "aerlingus",
-    "united",
-    "american",
-    "alaska",
-    "delta",
-    "jetblue",
-    "southwest",
-    "aeroplan",
-    "flyingblue",
-    "velocity",
-    "qantas",
-    "etihad",
-    "emirates",
-    "lifemiles",
-    "smiles",
-    "turkishairlines",
-    "connectmiles",
-    "aegean",
-    "tap",
-    "avianca",
-)
-
 
 def _text(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
@@ -166,7 +141,7 @@ def _format_trip(data: dict[str, Any]) -> str:
             },
             "start_date": {"type": "string", "description": "Start date in YYYY-MM-DD format."},
             "end_date": {"type": "string", "description": "End date in YYYY-MM-DD format."},
-            "take": {"type": "integer", "description": "Number of results to return (default 25, max 100)."},
+            "take": {"type": "integer", "description": "Number of results to return (default 500, max 1000)."},
             "cursor": {"type": "string", "description": "Pagination cursor from a previous search."},
         },
         "required": ["origin", "destination"],
@@ -178,20 +153,20 @@ async def award_search(args: dict[str, Any]) -> dict[str, Any]:
         return _error("SEATS_AERO_API_KEY is not configured.")
 
     params: dict[str, str] = {
-        "origin": args["origin"].upper(),
-        "destination": args["destination"].upper(),
+        "origin_airport": args["origin"].upper(),
+        "destination_airport": args["destination"].upper(),
     }
     if args.get("cabin"):
         cabin = args["cabin"].lower()
         if cabin not in VALID_CABINS:
             return _error(f"Invalid cabin. Must be one of: {', '.join(VALID_CABINS)}")
-        params["cabin"] = cabin
+        params["cabins"] = cabin
     if args.get("start_date"):
         params["start_date"] = args["start_date"]
     if args.get("end_date"):
         params["end_date"] = args["end_date"]
     if args.get("take"):
-        params["take"] = str(min(int(args["take"]), 100))
+        params["take"] = str(min(int(args["take"]), 1000))
     if args.get("cursor"):
         params["cursor"] = args["cursor"]
 
@@ -214,68 +189,6 @@ async def award_search(args: dict[str, Any]) -> dict[str, Any]:
     except Exception as e:
         return _error(f"Award search failed: {e}")
 
-
-@tool(
-    "award_search_live",
-    "Trigger a live award search on seats.aero. Queries the airline directly for real-time availability. Slower (up to 60s) but more accurate than cached search.",
-    {
-        "type": "object",
-        "properties": {
-            "origin": {"type": "string", "description": "Origin airport IATA code (e.g., 'SEA')."},
-            "destination": {"type": "string", "description": "Destination airport IATA code (e.g., 'NRT')."},
-            "date": {"type": "string", "description": "Travel date in YYYY-MM-DD format."},
-            "source": {
-                "type": "string",
-                "description": "Loyalty program to search (e.g., 'united', 'aeroplan', 'lifemiles').",
-            },
-            "cabin": {
-                "type": "string",
-                "description": "Cabin class: economy, premiumeconomy, business, or first.",
-                "enum": ["economy", "premiumeconomy", "business", "first"],
-            },
-        },
-        "required": ["origin", "destination", "date", "source"],
-    },
-)
-async def award_search_live(args: dict[str, Any]) -> dict[str, Any]:
-    api_key = _get_api_key()
-    if not api_key:
-        return _error("SEATS_AERO_API_KEY is not configured.")
-
-    source = args["source"].lower()
-    if source not in VALID_SOURCES:
-        return _error(f"Invalid source '{source}'. Must be one of: {', '.join(VALID_SOURCES)}")
-
-    payload: dict[str, str] = {
-        "origin": args["origin"].upper(),
-        "destination": args["destination"].upper(),
-        "date": args["date"],
-        "source": source,
-    }
-    if args.get("cabin"):
-        cabin = args["cabin"].lower()
-        if cabin not in VALID_CABINS:
-            return _error(f"Invalid cabin. Must be one of: {', '.join(VALID_CABINS)}")
-        payload["cabin"] = cabin
-
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{BASE_URL}/partnerapi/live",
-                json=payload,
-                headers=_headers(api_key),
-            )
-        err = await _handle_response(resp)
-        if err:
-            return err
-        data = resp.json()
-        return _text(_format_availability(data))
-    except httpx.ConnectError:
-        return _error("Could not connect to seats.aero. Service may be down.")
-    except httpx.TimeoutException:
-        return _error("Live search timed out (60s limit). The airline may be slow to respond.")
-    except Exception as e:
-        return _error(f"Live award search failed: {e}")
 
 
 @tool(
@@ -319,6 +232,5 @@ async def award_trip_details(args: dict[str, Any]) -> dict[str, Any]:
 
 SEATS_AERO_TOOLS: list[SdkMcpTool] = [
     award_search,
-    award_search_live,
     award_trip_details,
 ]
