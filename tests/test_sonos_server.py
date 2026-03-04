@@ -4,12 +4,46 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.mcp import sonos_server
+
+# The @tool decorator from claude_agent_sdk must preserve the original function
+# as .handler so tests can call it.  Other test files inject a plain MagicMock
+# for claude_agent_sdk which turns every decorated function into a MagicMock.
+# Fix: install a proper fake before (re-)importing sonos_server.
+
+class _FakeSdkMcpTool:
+    def __init__(self, handler: Any, name: str, description: str, schema: Any) -> None:
+        self.handler = handler
+        self.name = name
+        self.description = description
+        self.schema = schema
+
+
+def _fake_tool(name: str, description: str, schema: Any):  # noqa: ANN201
+    def decorator(fn: Any) -> _FakeSdkMcpTool:
+        return _FakeSdkMcpTool(fn, name, description, schema)
+    return decorator
+
+
+_mock_sdk = MagicMock()
+_mock_sdk.tool = _fake_tool
+_mock_sdk.SdkMcpTool = _FakeSdkMcpTool
+sys.modules["claude_agent_sdk"] = _mock_sdk
+
+# Mock soco and its submodules (not installed in test environment)
+sys.modules.setdefault("soco", MagicMock())
+sys.modules.setdefault("soco.plugins", MagicMock())
+sys.modules.setdefault("soco.plugins.sharelink", MagicMock())
+
+# Force reimport so sonos_server picks up the proper fake decorator
+sys.modules.pop("src.mcp.sonos_server", None)
+
+from src.mcp import sonos_server  # noqa: E402
 
 # The @tool decorator wraps functions into SdkMcpTool objects.
 # Access the underlying async handler via the .handler attribute.
