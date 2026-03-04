@@ -91,28 +91,20 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         files = event.get("files", [])
         if files:
             files_content: list[tuple[str, str, str]] = []
-            async with httpx.AsyncClient() as http_client:
+            async with httpx.AsyncClient(
+                headers={"Authorization": f"Bearer {config.slack_bot_token}"},
+                follow_redirects=True,
+            ) as http_client:
                 for file in files:
                     mimetype = file.get("mimetype", "")
+                    url = file.get("url_private_download") or file["url_private"]
                     if mimetype.startswith("text/") or mimetype in TEXT_MIMETYPES:
-                        resp = await http_client.get(
-                            file["url_private"],
-                            headers={
-                                "Authorization": f"Bearer {config.slack_bot_token}"
-                            },
-                            follow_redirects=True,
-                        )
+                        resp = await http_client.get(url)
                         files_content.append(
                             (file["name"], mimetype, resp.text)
                         )
                     elif mimetype in IMAGE_MIMETYPES:
-                        resp = await http_client.get(
-                            file["url_private"],
-                            headers={
-                                "Authorization": f"Bearer {config.slack_bot_token}"
-                            },
-                            follow_redirects=True,
-                        )
+                        resp = await http_client.get(url)
                         if resp.status_code == 200 and resp.content:
                             images.append((mimetype, resp.content))
                         else:
