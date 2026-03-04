@@ -15,6 +15,10 @@ RUN apt-get update && \
 RUN npm install -g @anthropic-ai/claude-code
 RUN npm install -g @privilegemendes/amadeus-mcp-server
 
+# Install Playwright MCP and browser dependencies for headless Chromium
+RUN npx --yes @playwright/mcp@latest --help > /dev/null 2>&1 && \
+    npx playwright install --with-deps chromium
+
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 

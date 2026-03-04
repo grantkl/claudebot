@@ -1,13 +1,11 @@
 tasks:
 - id: morning_email_digest
   name: Morning Email Digest
-  prompt: 'Check my Gmail inbox for unread emails received in the last 12 hours.
-
-    Summarize each email in 1-2 sentences, grouped by sender importance.
-
-    If there are no unread emails, respond with NOTHING_TO_REPORT.
-
-    '
+  prompt: "Check my Gmail inbox for unread emails received in the last 12 hours\n\
+    using gmail_list_emails. Summarize each email in 1-2 sentences, grouped by\n\
+    sender importance. If there are no unread emails, respond with NOTHING_TO_REPORT.\n\n\
+    CRITICAL: ONLY report emails actually returned by the tool. If the tool call\n\
+    fails or returns an error, say so — NEVER fabricate email content.\n"
   cron: 0 7 * * *
   mcp_servers:
   - gmail
@@ -16,12 +14,16 @@ tasks:
   enabled: true
 - id: important_email_alert
   name: Important Email Alert
-  prompt: "1. List unread emails with gmail_list_emails(query=\"is:unread\", max_results=10).\n\
-    2. If no results, respond with NOTHING_TO_REPORT.\n3. Collect the message IDs\
-    \ and call gmail_check_alerted(message_ids=[...]).\n   This returns only IDs that\
-    \ have NOT been alerted before.\n4. If no new IDs, respond with NOTHING_TO_REPORT.\n\
-    5. For each new ID, briefly summarize the email (from, subject, and a one-line\
-    \ snippet).\n6. Report ALL new unread emails \u2014 do not filter or skip any.\n"
+  prompt: "1. Call gmail_list_emails(query=\"is:unread\", max_results=10).\n\
+    2. If the tool returns no results or an error, respond with NOTHING_TO_REPORT.\n\
+    3. Collect the message IDs and call gmail_check_alerted(message_ids=[...]).\n\
+    \   This returns only IDs that have NOT been alerted before.\n\
+    4. If no new IDs remain, respond with NOTHING_TO_REPORT.\n\
+    5. For each new ID, report ONLY the from, subject, and snippet fields\n\
+    \   exactly as returned by the tool. Do NOT paraphrase or embellish.\n\
+    6. Report ALL new unread emails — do not filter or skip any.\n\n\
+    CRITICAL: ONLY report emails that were actually returned by gmail_list_emails.\n\
+    If a tool call fails or returns an error, say so — NEVER fabricate email content.\n"
   interval_seconds: 300
   mcp_servers:
   - gmail

@@ -84,11 +84,14 @@ class ClaudeManager:
                 mcp_servers = {}
             if mcp_servers:
                 system_prompt += (
-                    "\n\nCRITICAL: NEVER fabricate, invent, or hallucinate data that should"
-                    " come from tool calls. Only report information that was actually returned"
-                    " by a tool. If a tool call fails or returns an error, report the failure"
-                    " honestly — do NOT generate plausible-looking fake results. If you cannot"
-                    " retrieve data, say so clearly."
+                    "\n\nCRITICAL RULE — NO FABRICATION: You MUST NEVER fabricate, invent,"
+                    " or hallucinate data that should come from tool calls. Every piece of"
+                    " data you report (emails, prices, device states, search results) MUST"
+                    " come directly from a tool call response. If a tool call fails, returns"
+                    " an error, or returns no results, report that honestly. Do NOT generate"
+                    " plausible-looking fake data under any circumstances. When summarizing"
+                    " tool results, use only the fields returned by the tool — do not"
+                    " embellish, add details, or fill in gaps with guesses."
                 )
                 if os.environ.get("HOMECLAW_MCP_URL"):
                     system_prompt += (
