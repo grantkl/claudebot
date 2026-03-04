@@ -12,6 +12,7 @@ from .authorized_users import is_authorized, is_superuser
 from .claude_client import ClaudeManager
 from .config import Config
 from .message_utils import (
+    extract_image_paths,
     extract_large_code_blocks,
     format_error_message,
     format_file_attachments,
@@ -153,6 +154,22 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                     title=filename,
                 )
             post_text = modified_text if code_blocks else response
+
+            # Extract and upload screenshot images
+            modified_text2, image_files = extract_image_paths(post_text)
+            for img in image_files:
+                try:
+                    with open(img.path, "rb") as f:
+                        await client.files_upload_v2(
+                            channel=event["channel"],
+                            file=f,
+                            filename=img.filename,
+                            thread_ts=thread_ts,
+                            title=img.filename,
+                        )
+                except FileNotFoundError:
+                    logger.warning("Screenshot not found: %s", img.path)
+            post_text = modified_text2 if image_files else post_text
 
             for chunk in split_message(post_text):
                 await say(text=chunk, thread_ts=thread_ts)

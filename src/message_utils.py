@@ -133,6 +133,35 @@ def format_file_attachments(files_content: list[tuple[str, str, str]]) -> str:
     return "\n\n".join(blocks)
 
 
+class ImageFile(NamedTuple):
+    """An image file path extracted from a message."""
+
+    path: str
+    filename: str
+
+
+_IMAGE_PATH_RE = re.compile(r"(?<!\S)(/\S+\.(?:png|jpe?g))\b", re.IGNORECASE)
+
+
+def extract_image_paths(text: str) -> tuple[str, list[ImageFile]]:
+    """Extract absolute image file paths from text.
+
+    Finds absolute paths (starting with ``/``) ending in ``.png``, ``.jpeg``,
+    or ``.jpg``. Each match is replaced with a ``[Screenshot: <filename>]``
+    placeholder and returned as an :class:`ImageFile`.
+    """
+    extracted: list[ImageFile] = []
+
+    def _replacer(match: re.Match[str]) -> str:
+        path = match.group(1)
+        filename = path.rsplit("/", 1)[-1]
+        extracted.append(ImageFile(path=path, filename=filename))
+        return f"[Screenshot: {filename}]"
+
+    modified = _IMAGE_PATH_RE.sub(_replacer, text)
+    return modified, extracted
+
+
 _CODE_BLOCK_RE = re.compile(r"```(\w*)\n(.*?)```", re.DOTALL)
 
 

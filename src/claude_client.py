@@ -16,6 +16,7 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     ResultMessage,
     TextBlock,
+    ToolUseBlock,
 )
 
 from .config import Config
@@ -155,6 +156,8 @@ class ClaudeManager:
                     " and interact with web pages. Use browser_snapshot (not screenshots) to"
                     " read page content and find elements to interact with. Always use"
                     " browser_close when done with a browsing session."
+                    " When taking screenshots, always specify a filename parameter."
+                    " Screenshots you take will be automatically uploaded to the Slack thread."
                 )
             if mcp_server_names and "seats_aero" in mcp_server_names:
                 system_prompt += (
@@ -225,14 +228,25 @@ class ClaudeManager:
                 else:
                     await entry.client.query(query_text)
                 response_parts: list[str] = []
+                screenshot_paths: list[str] = []
                 async for msg in entry.client.receive_response():
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if isinstance(block, TextBlock):
                                 response_parts.append(block.text)
+                            elif isinstance(block, ToolUseBlock) and "screenshot" in block.name.lower():
+                                fn = block.input.get("filename")
+                                if fn:
+                                    abs_path = os.path.abspath(fn)
+                                    screenshot_paths.append(abs_path)
                     elif isinstance(msg, ResultMessage):
                         break
-                return "".join(response_parts)
+                text = "".join(response_parts)
+                if screenshot_paths:
+                    new_paths = [p for p in screenshot_paths if p not in text]
+                    if new_paths:
+                        text += "\n" + "\n".join(new_paths)
+                return text
             except Exception:
                 logger.exception(
                     "Error in Claude session for thread %s", thread_ts

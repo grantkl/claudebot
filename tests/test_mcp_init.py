@@ -98,7 +98,7 @@ class TestBuildMcpServersPlaywright:
         assert "playwright" in servers
         assert servers["playwright"]["type"] == "stdio"
         assert servers["playwright"]["command"] == "npx"
-        assert servers["playwright"]["args"] == ["--yes", "@playwright/mcp@latest", "--headless"]
+        assert servers["playwright"]["args"] == ["--yes", "@playwright/mcp@latest", "--headless", "--browser", "chromium"]
 
     @patch.dict("os.environ", {"PLAYWRIGHT_ENABLED": "false"}, clear=False)
     def test_playwright_disabled(self):

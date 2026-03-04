@@ -24,6 +24,14 @@ class _FakeAssistantMessage:
 
 
 @dataclass
+class _FakeToolUseBlock:
+    name: str
+    input: dict
+    id: str = "tool_1"
+    type: str = "tool_use"
+
+
+@dataclass
 class _FakeResultMessage:
     stop_reason: str = "end_turn"
 
@@ -57,6 +65,7 @@ _mock_sdk.ClaudeSDKClient = _FakeClaudeSDKClient
 _mock_sdk.ClaudeAgentOptions = _FakeClaudeAgentOptions
 _mock_sdk.AssistantMessage = _FakeAssistantMessage
 _mock_sdk.TextBlock = _FakeTextBlock
+_mock_sdk.ToolUseBlock = _FakeToolUseBlock
 _mock_sdk.ResultMessage = _FakeResultMessage
 
 # Temporarily inject mock SDK for import, then restore only the claude_agent_sdk
@@ -281,7 +290,7 @@ class TestClaudeManager:
         ])
         with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
             await manager.send_message("t1", "hello", thread_context="[Previous context]")
-        fake_client.query.assert_called_once_with("[Previous context]\n\nhello")
+        fake_client.query.assert_called_once_with("[Previous context]\n\n[NEW MESSAGE — respond to this only:]\nhello")
 
     @pytest.mark.asyncio
     async def test_thread_context_ignored_for_existing_session(self):
@@ -438,7 +447,7 @@ class TestClaudeManager:
         content = items[0]["message"]["content"]
         # Thread context should be prepended in the text block
         assert content[0]["type"] == "text"
-        assert content[0]["text"] == "[Previous context]\n\ndescribe"
+        assert content[0]["text"] == "[Previous context]\n\n[NEW MESSAGE — respond to this only:]\ndescribe"
         # Image block still present
         assert content[1]["type"] == "image"
 
@@ -783,3 +792,63 @@ class TestClaudeManager:
         call_kwargs = mock_cls.call_args
         options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
         assert "Playwright" not in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_screenshot_tool_use_block_paths_appended_to_response(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[
+                _FakeToolUseBlock(
+                    name="mcp__playwright__browser_take_screenshot",
+                    input={"filename": "page.png"},
+                ),
+                _FakeTextBlock(text="Here is the screenshot."),
+            ]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            result = await manager.send_message("t1", "take a screenshot")
+        import os
+        expected_path = os.path.abspath("page.png")
+        assert "Here is the screenshot." in result
+        assert expected_path in result
+
+    @pytest.mark.asyncio
+    async def test_non_screenshot_tool_use_block_ignored(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[
+                _FakeToolUseBlock(
+                    name="mcp__playwright__browser_click",
+                    input={"ref": "btn1"},
+                ),
+                _FakeTextBlock(text="Clicked the button."),
+            ]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            result = await manager.send_message("t1", "click the button")
+        assert result == "Clicked the button."
+
+    @pytest.mark.asyncio
+    async def test_screenshot_tool_use_block_without_filename_ignored(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[
+                _FakeToolUseBlock(
+                    name="mcp__playwright__browser_take_screenshot",
+                    input={"type": "png"},
+                ),
+                _FakeTextBlock(text="Screenshot taken."),
+            ]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            result = await manager.send_message("t1", "screenshot without filename")
+        assert result == "Screenshot taken."
