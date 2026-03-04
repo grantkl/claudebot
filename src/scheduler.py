@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 NOTHING_TO_REPORT = "NOTHING_TO_REPORT"
 
+SUPERUSER_MCP_SERVERS = {"sonos", "homekit", "gmail", "flights", "flight_watch", "seats_aero", "playwright"}
+AUTHORIZED_MCP_SERVERS = {"sonos", "homekit", "flights", "flight_watch", "scheduler"}
+
 
 @dataclass
 class TaskDefinition:
@@ -35,6 +38,7 @@ class TaskDefinition:
     model: str = "sonnet"
     enabled: bool = True
     run_once: bool = False
+    created_by: str | None = None
 
 
 @dataclass
@@ -68,6 +72,23 @@ class TaskScheduler:
         self._load_tasks()
         self._load_state()
 
+    def validate_task_mcp_servers(self, task_data: dict[str, Any]) -> None:
+        """Validate that the task creator is allowed to use the requested MCP servers."""
+        created_by = task_data.get("created_by")
+        if created_by is None:
+            return
+        if created_by in self._config.superuser_ids:
+            allowed = SUPERUSER_MCP_SERVERS
+        elif created_by in self._config.authorized_user_ids:
+            allowed = AUTHORIZED_MCP_SERVERS
+        else:
+            allowed: set[str] = set()
+        disallowed = [s for s in task_data.get("mcp_servers", []) if s not in allowed]
+        if disallowed:
+            raise ValueError(
+                f"User {created_by} is not allowed to use MCP servers: {', '.join(disallowed)}"
+            )
+
     def _load_tasks(self) -> None:
         """Load task definitions from YAML file."""
         path = Path(self._tasks_file)
@@ -92,6 +113,7 @@ class TaskScheduler:
                 model=task_data.get("model", "sonnet"),
                 enabled=task_data.get("enabled", True),
                 run_once=task_data.get("run_once", False),
+                created_by=task_data.get("created_by"),
             )
             self._tasks[task.id] = task
         logger.info("Loaded %d tasks from %s", len(self._tasks), self._tasks_file)
@@ -185,6 +207,17 @@ class TaskScheduler:
         # Strip "scheduler" from MCP server names to prevent recursion
         mcp_server_names = {s for s in task.mcp_servers if s != "scheduler"}
 
+        # Determine privileges based on task creator
+        if task.created_by in self._config.superuser_ids:
+            authorized, superuser = True, True
+        elif task.created_by in self._config.authorized_user_ids:
+            authorized, superuser = True, False
+        elif task.created_by is None:
+            # Legacy tasks (no creator) get full privileges for backward compat
+            authorized, superuser = True, True
+        else:
+            authorized, superuser = False, False
+
         logger.info("Executing scheduled task: %s (%s)", task.name, task_id)
 
         try:
@@ -193,8 +226,8 @@ class TaskScheduler:
                 prompt,
                 model=task.model,
                 mcp_server_names=mcp_server_names,
-                authorized=True,
-                superuser=True,
+                authorized=authorized,
+                superuser=superuser,
             )
 
             state.last_run_time = time.strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -202,7 +235,7 @@ class TaskScheduler:
 
             # Send DM if response is actionable
             if task.output == "dm" and NOTHING_TO_REPORT not in response:
-                await self._send_dm(response, task.name)
+                await self._send_dm(response, task.name, user_id=task.created_by)
 
             # Auto-disable one-time tasks after successful execution
             if task.run_once:
@@ -225,22 +258,24 @@ class TaskScheduler:
                     f"Scheduled task *{task.name}* has been automatically paused "
                     f"after {state.consecutive_failures} consecutive failures.",
                     "Scheduler Alert",
+                    user_id=task.created_by,
                 )
         finally:
             await self._claude_manager.remove_session(thread_ts)
             self._save_state()
 
-    async def _send_dm(self, text: str, task_name: str) -> None:
-        """Send a DM to all superusers."""
+    async def _send_dm(self, text: str, task_name: str, user_id: str | None = None) -> None:
+        """Send a DM to a specific user, or broadcast to all superusers if user_id is None."""
         from slack_sdk.web.async_client import AsyncWebClient
 
         client = AsyncWebClient(token=self._slack_token)
         message = f"*[{task_name}]*\n{text}"
-        for user_id in self._config.superuser_ids:
+        recipients = [user_id] if user_id else list(self._config.superuser_ids)
+        for recipient in recipients:
             try:
-                await client.chat_postMessage(channel=user_id, text=message)
+                await client.chat_postMessage(channel=recipient, text=message)
             except Exception:
-                logger.exception("Failed to send DM to %s", user_id)
+                logger.exception("Failed to send DM to %s", recipient)
 
     def _compute_next_run(
         self, task: TaskDefinition, state: TaskState
@@ -298,6 +333,7 @@ class TaskScheduler:
                 "mcp_servers": task.mcp_servers,
                 "output": task.output,
                 "run_once": task.run_once,
+                "created_by": task.created_by,
             })
         return result
 
@@ -318,6 +354,7 @@ class TaskScheduler:
             "model": task.model,
             "enabled": task.enabled,
             "run_once": task.run_once,
+            "created_by": task.created_by,
             "paused": state.paused,
             "last_run": state.last_run_time,
             "consecutive_failures": state.consecutive_failures,
@@ -325,6 +362,7 @@ class TaskScheduler:
 
     def add_task(self, task_data: dict[str, Any]) -> TaskDefinition:
         """Add a new task and save to YAML."""
+        self.validate_task_mcp_servers(task_data)
         task = TaskDefinition(
             id=task_data["id"],
             name=task_data["name"],
@@ -336,6 +374,7 @@ class TaskScheduler:
             model=task_data.get("model", "sonnet"),
             enabled=task_data.get("enabled", True),
             run_once=task_data.get("run_once", False),
+            created_by=task_data.get("created_by"),
         )
         self._tasks[task.id] = task
         self._save_tasks()
@@ -417,6 +456,8 @@ class TaskScheduler:
             task_dict["enabled"] = task.enabled
             if task.run_once:
                 task_dict["run_once"] = True
+            if task.created_by:
+                task_dict["created_by"] = task.created_by
             tasks_data.append(task_dict)
         with open(path, "w") as f:
             yaml.dump({"tasks": tasks_data}, f, default_flow_style=False, sort_keys=False)

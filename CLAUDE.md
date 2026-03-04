@@ -49,8 +49,8 @@ Three tiers, determined by `SUPERUSER_IDS` and `AUTHORIZED_USER_IDS` env vars. N
 
 | Tier | Model | MCP Servers | Blocked Tools | Rate Limited |
 |---|---|---|---|---|
-| Superuser | opus | sonos + homekit + gmail + scheduler + flights + flight_watch + seats_aero | None | No |
-| Authorized | sonnet | sonos + homekit + flights + flight_watch | Bash, Read, Edit, Write, Glob, Grep | No |
+| Superuser | opus | sonos + homekit + gmail + scheduler + flights + flight_watch + seats_aero + playwright | None | No |
+| Authorized | sonnet | sonos + homekit + flights + flight_watch + scheduler | Bash, Read, Edit, Write, Glob, Grep | No |
 | Everyone else | haiku | _(none)_ | Bash, Read, Edit, Write, Glob, Grep | Yes |
 
 **Security:** Non-superuser tiers have filesystem tools blocked to prevent capability discovery (e.g., reading source code to find that Gmail MCP exists). When a session has fewer MCP servers than what's available globally, a generic system prompt instructs Claude not to mention or suggest unavailable capabilities. Session eviction prevents a lower-tier user from inheriting a higher-tier session in the same thread.
@@ -74,6 +74,7 @@ When `ENABLE_MCP=true`, MCP servers are built once at startup and selectively in
 - **Flights** — conditionally loaded when `FLIGHTS_ENABLED=true`; subprocess stdio MCP server (`@privilegemendes/amadeus-mcp-server`) using the official Amadeus API. Available to superuser and authorized tiers (not free-tier users, since API calls have cost). Tools: search-flights, search-airports, flight-price-analysis, flight-inspiration, airport-routes, nearest-airports.
 - **Flight Watch** — conditionally loaded when `FLIGHTS_ENABLED=true`; manages flight price watches with automatic periodic checks. Supports both route-based watches (origin/destination on flexible dates) and specific flight tracking by airline and flight number for booked itineraries. Superuser and authorized tiers. Tools: flight_watch_add, flight_watch_list, flight_watch_remove, flight_watch_record, flight_watch_history.
 - **Seats Aero** — conditionally loaded when `SEATS_AERO_API_KEY` is set; searches award flight availability across 24 loyalty programs via the seats.aero Partner API. Independent of FLIGHTS_ENABLED. Superuser-only. Tools: award_search, award_trip_details.
+- **Playwright** — conditionally loaded when `PLAYWRIGHT_ENABLED=true`; provides full browser automation via `@playwright/mcp` (subprocess stdio, runs headless via npx). Superuser-only. Enables navigating to URLs, clicking elements, filling forms, taking screenshots, and interacting with web pages.
 
 ### Autonomous Task Scheduler
 
@@ -92,7 +93,10 @@ tasks:
     output: dm                   # "dm" or "silent"
     model: sonnet                 # opus/sonnet/haiku
     enabled: true
+    created_by: U12345          # Slack user ID of task owner (auto-set by MCP tool)
 ```
+
+**Task ownership:** Tasks have an optional `created_by` field (Slack user ID) set automatically when created via MCP tools. The creator's tier determines which MCP servers the task can use (validated at creation time). Task result DMs go only to the task owner; tasks without an owner (legacy) broadcast to all superusers.
 
 **Management:** Superusers can manage tasks via Slack conversation using scheduler MCP tools (`scheduler_list_tasks`, `scheduler_add_task`, `scheduler_update_task`, `scheduler_remove_task`, `scheduler_pause_task`, `scheduler_resume_task`, `scheduler_trigger_task`, `scheduler_reload`).
 
@@ -129,3 +133,4 @@ Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional
 - `AMADEUS_CLIENT_SECRET` — Amadeus API client secret
 - `FLIGHT_WATCH_FILE` — path to flight watch data file (default `data/flight_watches.json`)
 - `SEATS_AERO_API_KEY` — seats.aero Partner API key for award flight availability search
+- `PLAYWRIGHT_ENABLED` — set to `true` to enable the Playwright browser automation MCP

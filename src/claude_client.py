@@ -74,7 +74,7 @@ class ClaudeManager:
     async def remove_session(self, thread_ts: str) -> None:
         await self._remove_session(thread_ts)
 
-    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False) -> str:
+    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None) -> str:
         is_new_session = thread_ts not in self._sessions
         if is_new_session:
             system_prompt = self._config.claude_system_prompt
@@ -99,14 +99,25 @@ class ClaudeManager:
             if mcp_server_names and "gmail" in mcp_server_names:
                 system_prompt += (
                     "\n\nYou have access to Gmail capabilities via MCP tools."
-                    " You can list, search, and read emails, and mark them as read."
+                    " You can list, search, and read emails, mark them as read,"
+                    " and star/unstar emails for follow-up."
                     " You CANNOT send emails."
+                    " When a user asks to be reminded about an email, star it and"
+                    " create a run_once scheduler task that references the email subject/sender."
                 )
             if mcp_server_names and "scheduler" in mcp_server_names:
                 system_prompt += (
                     "\n\nYou have access to a task scheduler via MCP tools."
                     " You can list, add, update, remove, pause, resume, and trigger"
-                    " scheduled autonomous tasks."
+                    " scheduled autonomous tasks. All cron expressions are in US/Pacific time."
+                    " When the user says a time like '5pm', use Pacific time in the cron."
+                    " For one-time reminders, set run_once=true so the task auto-disables after firing."
+                )
+            if mcp_server_names and "scheduler" in mcp_server_names and user_id:
+                system_prompt += (
+                    f'\n\nThe current user\'s Slack ID is {user_id}. When creating'
+                    f' tasks with scheduler_add_task, you MUST include'
+                    f' "created_by": "{user_id}".'
                 )
             if mcp_server_names and "flights" in mcp_server_names:
                 system_prompt += (
@@ -124,6 +135,14 @@ class ClaudeManager:
                     " List active watches (flight_watch_list), view price history"
                     " (flight_watch_history), and remove watches (flight_watch_remove)."
                     " Price checks run automatically every 6 hours via the scheduler."
+                )
+            if mcp_server_names and "playwright" in mcp_server_names:
+                system_prompt += (
+                    "\n\nYou have access to browser automation via Playwright MCP tools."
+                    " You can navigate to URLs, click elements, fill forms, take screenshots,"
+                    " and interact with web pages. Use browser_snapshot (not screenshots) to"
+                    " read page content and find elements to interact with. Always use"
+                    " browser_close when done with a browsing session."
                 )
             if mcp_server_names and "seats_aero" in mcp_server_names:
                 system_prompt += (
