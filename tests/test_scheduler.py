@@ -98,7 +98,8 @@ class TestNextRunComputation:
         state = TaskState()
         next_run = scheduler._compute_next_run(task, state)
         assert next_run is not None
-        assert next_run > time.time() - 1  # should be in the future (or very close)
+        # Stateless tasks return the most recent past cron match (catch-up)
+        assert next_run <= time.time()
 
     def test_interval_first_run(self, tmp_path):
         tasks = [_sample_task_data()]
