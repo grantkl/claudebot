@@ -83,6 +83,13 @@ class ClaudeManager:
             else:
                 mcp_servers = {}
             if mcp_servers:
+                system_prompt += (
+                    "\n\nCRITICAL: NEVER fabricate, invent, or hallucinate data that should"
+                    " come from tool calls. Only report information that was actually returned"
+                    " by a tool. If a tool call fails or returns an error, report the failure"
+                    " honestly — do NOT generate plausible-looking fake results. If you cannot"
+                    " retrieve data, say so clearly."
+                )
                 if os.environ.get("HOMECLAW_MCP_URL"):
                     system_prompt += (
                         "\n\nYou have access to smart home capabilities via MCP tools."
