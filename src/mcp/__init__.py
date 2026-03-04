@@ -25,9 +25,10 @@ def _resolve_playwright_path() -> bool:
 def _resolve_amadeus_path() -> str | None:
     """Resolve the path to the amadeus MCP server's stdio entry point."""
     try:
+        env = {**os.environ, "NODE_PATH": "/usr/lib/node_modules"}
         result = _subprocess.run(
             ["node", "-e", "console.log(require.resolve('@privilegemendes/amadeus-mcp-server/dist/index.js'))"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, env=env,
         )
         if result.returncode == 0:
             return result.stdout.strip()
