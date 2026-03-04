@@ -132,7 +132,7 @@ class TestPayloadValidation:
         from aiohttp import web
         call_args = web.json_response.call_args
         assert call_args[1]["status"] == 400
-        assert "missing required fields" in call_args[0][0]["error"]
+        assert "text, user_id" in call_args[0][0]["error"]
 
     @pytest.mark.asyncio
     async def test_missing_user_id_returns_400(self):
@@ -150,19 +150,25 @@ class TestPayloadValidation:
         assert call_args[1]["status"] == 400
 
     @pytest.mark.asyncio
-    async def test_missing_notify_returns_400(self):
+    async def test_notify_defaults_to_user_id(self):
         config = _make_config()
         claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value="result")
+        claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
             body={"text": "hi", "user_id": "U1"},
         )
 
-        resp = await _call_handler(config, claude_manager, request)
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            mock_instance = AsyncMock()
+            MockClient.return_value = mock_instance
+            await _call_handler(config, claude_manager, request)
 
-        from aiohttp import web
-        call_args = web.json_response.call_args
-        assert call_args[1]["status"] == 400
+        assert mock_instance.chat_postMessage.call_count == 1
+        mock_instance.chat_postMessage.assert_called_once_with(
+            channel="U1", text="result"
+        )
 
     @pytest.mark.asyncio
     async def test_invalid_json_returns_400(self):

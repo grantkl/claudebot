@@ -38,11 +38,14 @@ def create_webhook_app(config: Config, claude_manager: ClaudeManager) -> web.App
         notify = body.get("notify")
         model = body.get("model")
 
-        if not text or not user_id or notify is None:
+        if not text or not user_id:
             return web.json_response(
-                {"ok": False, "error": "missing required fields: text, user_id, notify"},
+                {"ok": False, "error": "missing required fields: text, user_id"},
                 status=400,
             )
+
+        if notify is None:
+            notify = [user_id]
 
         # Determine tier-based access
         superuser = is_superuser(user_id, config.superuser_ids)
