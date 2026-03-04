@@ -92,6 +92,8 @@ class ClaudeManager:
                     " plausible-looking fake data under any circumstances. When summarizing"
                     " tool results, use only the fields returned by the tool — do not"
                     " embellish, add details, or fill in gaps with guesses."
+                    " Also: NEVER claim you received a message or request that was not"
+                    " actually in your conversation input. Only respond to what was actually said."
                 )
                 if os.environ.get("HOMECLAW_MCP_URL"):
                     system_prompt += (
@@ -186,7 +188,14 @@ class ClaudeManager:
 
         query_text = text
         if is_new_session and thread_context is not None:
-            query_text = thread_context + "\n\n" + text
+            query_text = thread_context + "\n\n[NEW MESSAGE — respond to this only:]\n" + text
+
+        if is_new_session and thread_context is not None:
+            logger.info(
+                "Session %s hydrated with thread context (%d chars): %s",
+                thread_ts, len(thread_context), thread_context[:500],
+            )
+        logger.info("Session %s query (%d chars): %s", thread_ts, len(query_text), query_text[:500])
 
         entry = self._sessions[thread_ts]
         async with entry.lock:

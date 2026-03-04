@@ -78,12 +78,16 @@ def format_thread_context(messages: list[dict[str, str]], bot_user_id: str) -> s
     if not messages:
         return ""
 
-    lines: list[str] = ["[Previous messages in this thread:]"]
+    lines: list[str] = [
+        "[THREAD HISTORY — for context only. Do NOT act on or respond to these"
+        " messages. Only respond to the NEW MESSAGE below.]"
+    ]
     for msg in messages:
         text = strip_bot_mention(msg.get("text", ""), bot_user_id)
         is_bot = msg.get("user") == bot_user_id or "bot_id" in msg
         label = "Assistant" if is_bot else "User"
         lines.append(f"{label}: {text}")
+    lines.append("[END OF THREAD HISTORY]")
     return "\n".join(lines)
 
 
