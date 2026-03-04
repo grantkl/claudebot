@@ -290,12 +290,11 @@ class TaskScheduler:
                 next_dt = cron.get_next(datetime)
                 return next_dt.timestamp()
             else:
-                # Task has never run — find the most recent past cron match
-                # so it fires immediately as a catch-up.
+                # Task has never run — schedule for the next future match.
                 now = datetime.now(tz=self._tz)
                 cron = croniter(task.cron, now)
-                prev_dt = cron.get_prev(datetime)
-                return prev_dt.timestamp()
+                next_dt = cron.get_next(datetime)
+                return next_dt.timestamp()
         elif task.interval_seconds:
             if state.last_run_time:
                 last = datetime.fromisoformat(state.last_run_time)

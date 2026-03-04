@@ -17,14 +17,22 @@ sys.modules.setdefault("claude_agent_sdk", MagicMock())
 sys.modules.setdefault("slack_bolt", MagicMock())
 sys.modules.setdefault("slack_bolt.async_app", MagicMock())
 
+# Mock slack_sdk so that patch("slack_sdk.web.async_client.AsyncWebClient") works
+# without requiring aiohttp to be installed.
+_mock_slack_sdk = MagicMock()
+sys.modules.setdefault("slack_sdk", _mock_slack_sdk)
+sys.modules.setdefault("slack_sdk.web", _mock_slack_sdk.web)
+sys.modules.setdefault("slack_sdk.web.async_client", _mock_slack_sdk.web.async_client)
+
 from src.scheduler import NOTHING_TO_REPORT, TaskDefinition, TaskScheduler, TaskState  # noqa: E402
 
 
-def _make_config():
+def _make_config(**overrides):
     cfg = MagicMock()
     cfg.scheduler_concurrency = 3
     cfg.scheduler_timezone = "US/Pacific"
-    cfg.superuser_ids = {"U_SUPER"}
+    cfg.superuser_ids = overrides.get("superuser_ids", {"U_SUPER"})
+    cfg.authorized_user_ids = overrides.get("authorized_user_ids", set())
     return cfg
 
 
@@ -48,9 +56,9 @@ def _sample_task_data():
     }
 
 
-def _make_scheduler(tmp_path, tasks=None):
+def _make_scheduler(tmp_path, tasks=None, **config_overrides):
     """Create a scheduler with optional tasks written to a YAML file."""
-    config = _make_config()
+    config = _make_config(**config_overrides)
     claude_manager = AsyncMock()
     state_file = str(tmp_path / "state.json")
     if tasks is not None:
@@ -98,8 +106,8 @@ class TestNextRunComputation:
         state = TaskState()
         next_run = scheduler._compute_next_run(task, state)
         assert next_run is not None
-        # Stateless tasks return the most recent past cron match (catch-up)
-        assert next_run <= time.time()
+        # Stateless tasks schedule for the next future cron match
+        assert next_run > time.time()
 
     def test_interval_first_run(self, tmp_path):
         tasks = [_sample_task_data()]
@@ -359,3 +367,152 @@ class TestStatePersistence:
         assert state.last_run_time == "2026-03-01T10:00:00-0800"
         assert state.consecutive_failures == 2
         assert state.paused is True
+
+
+# ---------------------------------------------------------------------------
+# TestTaskOwnership
+# ---------------------------------------------------------------------------
+class TestTaskOwnership:
+    def test_created_by_loads_from_yaml(self, tmp_path):
+        task_data = {**_sample_task_data(), "created_by": "U_OWNER"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task_data])
+        assert scheduler._tasks["test_task"].created_by == "U_OWNER"
+
+    def test_created_by_saves_to_yaml(self, tmp_path):
+        scheduler = _make_scheduler(tmp_path, tasks=[], superuser_ids={"U_OWNER"})
+        task_data = {**_sample_task_data(), "created_by": "U_OWNER"}
+        scheduler.add_task(task_data)
+        with open(scheduler._tasks_file) as f:
+            saved = yaml.safe_load(f)
+        assert saved["tasks"][0]["created_by"] == "U_OWNER"
+
+    def test_created_by_none_not_written_to_yaml(self, tmp_path):
+        scheduler = _make_scheduler(tmp_path, tasks=[])
+        task_data = _sample_task_data()
+        # Ensure no created_by key
+        task_data.pop("created_by", None)
+        scheduler.add_task(task_data)
+        with open(scheduler._tasks_file) as f:
+            saved = yaml.safe_load(f)
+        assert "created_by" not in saved["tasks"][0]
+
+    async def test_send_dm_targets_owner(self, tmp_path):
+        scheduler = _make_scheduler(tmp_path, tasks=[])
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            mock_client_instance = AsyncMock()
+            MockClient.return_value = mock_client_instance
+            await scheduler._send_dm("test message", "Test Task", user_id="UOWNER")
+        mock_client_instance.chat_postMessage.assert_called_once()
+        call_kwargs = mock_client_instance.chat_postMessage.call_args.kwargs
+        assert call_kwargs["channel"] == "UOWNER"
+
+    async def test_send_dm_broadcasts_without_owner(self, tmp_path):
+        scheduler = _make_scheduler(
+            tmp_path, tasks=[], superuser_ids={"U_S1", "U_S2"},
+        )
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            mock_client_instance = AsyncMock()
+            MockClient.return_value = mock_client_instance
+            await scheduler._send_dm("test message", "Test Task")
+        assert mock_client_instance.chat_postMessage.call_count == 2
+        channels = {
+            c.kwargs["channel"]
+            for c in mock_client_instance.chat_postMessage.call_args_list
+        }
+        assert channels == {"U_S1", "U_S2"}
+
+    async def test_execute_task_superuser_creator(self, tmp_path):
+        task_data = {**_sample_task_data(), "created_by": "U_SUPER"}
+        scheduler = _make_scheduler(
+            tmp_path, tasks=[task_data], superuser_ids={"U_SUPER"},
+        )
+        scheduler._claude_manager.send_message = AsyncMock(return_value=NOTHING_TO_REPORT)
+        scheduler._claude_manager.remove_session = AsyncMock()
+        with patch("slack_sdk.web.async_client.AsyncWebClient"):
+            await scheduler._execute_task(scheduler._tasks["test_task"])
+        call_kwargs = scheduler._claude_manager.send_message.call_args.kwargs
+        assert call_kwargs["superuser"] is True
+        assert call_kwargs["authorized"] is True
+
+    async def test_execute_task_authorized_creator(self, tmp_path):
+        task_data = {**_sample_task_data(), "created_by": "U_AUTH", "mcp_servers": ["sonos"]}
+        scheduler = _make_scheduler(
+            tmp_path, tasks=[task_data],
+            superuser_ids={"U_SUPER"}, authorized_user_ids={"U_AUTH"},
+        )
+        scheduler._claude_manager.send_message = AsyncMock(return_value=NOTHING_TO_REPORT)
+        scheduler._claude_manager.remove_session = AsyncMock()
+        with patch("slack_sdk.web.async_client.AsyncWebClient"):
+            await scheduler._execute_task(scheduler._tasks["test_task"])
+        call_kwargs = scheduler._claude_manager.send_message.call_args.kwargs
+        assert call_kwargs["authorized"] is True
+        assert call_kwargs["superuser"] is False
+
+    async def test_execute_task_legacy_no_creator(self, tmp_path):
+        task_data = _sample_task_data()
+        task_data.pop("created_by", None)
+        scheduler = _make_scheduler(tmp_path, tasks=[task_data])
+        scheduler._claude_manager.send_message = AsyncMock(return_value=NOTHING_TO_REPORT)
+        scheduler._claude_manager.remove_session = AsyncMock()
+        with patch("slack_sdk.web.async_client.AsyncWebClient"):
+            await scheduler._execute_task(scheduler._tasks["test_task"])
+        call_kwargs = scheduler._claude_manager.send_message.call_args.kwargs
+        assert call_kwargs["superuser"] is True
+        assert call_kwargs["authorized"] is True
+
+    def test_validate_mcp_rejects_gmail_for_authorized(self, tmp_path):
+        scheduler = _make_scheduler(
+            tmp_path, tasks=[],
+            superuser_ids={"U_SUPER"}, authorized_user_ids={"U_AUTH"},
+        )
+        with pytest.raises(ValueError, match="not allowed"):
+            scheduler.add_task({
+                "id": "bad_task",
+                "name": "Bad Task",
+                "prompt": "Do something",
+                "mcp_servers": ["gmail"],
+                "created_by": "U_AUTH",
+            })
+
+    def test_validate_mcp_allows_gmail_for_superuser(self, tmp_path):
+        scheduler = _make_scheduler(
+            tmp_path, tasks=[],
+            superuser_ids={"U_SUPER"}, authorized_user_ids={"U_AUTH"},
+        )
+        task = scheduler.add_task({
+            "id": "good_task",
+            "name": "Good Task",
+            "prompt": "Do something",
+            "mcp_servers": ["gmail"],
+            "created_by": "U_SUPER",
+        })
+        assert task.id == "good_task"
+        assert task.created_by == "U_SUPER"
+
+    async def test_circuit_breaker_dms_owner(self, tmp_path):
+        task_data = {**_sample_task_data(), "created_by": "UOWNER"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task_data])
+        scheduler._claude_manager.send_message = AsyncMock(side_effect=RuntimeError("boom"))
+        scheduler._claude_manager.remove_session = AsyncMock()
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            mock_client_instance = AsyncMock()
+            MockClient.return_value = mock_client_instance
+            task = scheduler._tasks["test_task"]
+            for _ in range(5):
+                await scheduler._execute_task(task)
+        # Circuit breaker DM should go to the owner
+        last_call_kwargs = mock_client_instance.chat_postMessage.call_args.kwargs
+        assert last_call_kwargs["channel"] == "UOWNER"
+        assert "paused" in last_call_kwargs["text"].lower()
+
+    def test_list_tasks_includes_created_by(self, tmp_path):
+        task_data = {**_sample_task_data(), "created_by": "U_OWNER"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task_data])
+        result = scheduler.list_tasks()
+        assert result[0]["created_by"] == "U_OWNER"
+
+    def test_get_task_includes_created_by(self, tmp_path):
+        task_data = {**_sample_task_data(), "created_by": "U_OWNER"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task_data])
+        result = scheduler.get_task("test_task")
+        assert result["created_by"] == "U_OWNER"
