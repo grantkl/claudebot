@@ -72,6 +72,10 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                 channel=event["channel"], ts=thread_ts
             )
             messages = result.get("messages", [])
+            logger.info(
+                "Thread hydration for %s: conversations_replies returned %d messages from channel %s",
+                thread_ts, len(messages), event["channel"],
+            )
             context_messages = messages[:-1]
             if context_messages:
                 thread_context = format_thread_context(

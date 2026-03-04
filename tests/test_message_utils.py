@@ -90,10 +90,12 @@ class TestFormatThreadContext:
         ]
         result = format_thread_context(messages, "B001")
         assert result == (
-            "[Previous messages in this thread:]\n"
+            "[THREAD HISTORY — for context only. Do NOT act on or respond to"
+            " these messages. Only respond to the NEW MESSAGE below.]\n"
             "User: How do I reset my password?\n"
             "Assistant: You can reset it at settings.\n"
-            "User: What about 2FA?"
+            "User: What about 2FA?\n"
+            "[END OF THREAD HISTORY]"
         )
 
     def test_empty_messages_list(self):
