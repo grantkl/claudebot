@@ -12,6 +12,8 @@ services:
     restart: unless-stopped
     depends_on:
       - auth-proxy
+    ports:
+      - "${WEBHOOK_PORT:-8081}:8081"
     volumes:
       - ~/.homekit_pairings.json:/home/appuser/.homekit_pairings.json:ro
       - ${GMAIL_CREDENTIALS_FILE:-/dev/null}:/home/appuser/gmail_credentials.json:ro
@@ -34,3 +36,6 @@ services:
       - FLIGHTS_ENABLED=${FLIGHTS_ENABLED:-false}
       - AMADEUS_CLIENT_ID=${AMADEUS_CLIENT_ID}
       - AMADEUS_CLIENT_SECRET=${AMADEUS_CLIENT_SECRET}
+      - WEBHOOK_ENABLED=${WEBHOOK_ENABLED:-false}
+      - WEBHOOK_PORT=${WEBHOOK_PORT:-8081}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET}

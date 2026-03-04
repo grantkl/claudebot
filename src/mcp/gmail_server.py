@@ -238,7 +238,51 @@ async def gmail_mark_as_read(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 4. gmail_check_alerted — dedup helper for scheduled email alerts
+# 4. gmail_star_email
+# ---------------------------------------------------------------------------
+@tool(
+    "gmail_star_email",
+    "Star or unstar a Gmail email. Starred emails appear under the 'Starred' label in Gmail.",
+    {
+        "type": "object",
+        "properties": {
+            "message_id": {
+                "type": "string",
+                "description": "The Gmail message ID to star or unstar.",
+            },
+            "star": {
+                "type": "boolean",
+                "description": "True to star, false to unstar. Defaults to true.",
+            },
+        },
+        "required": ["message_id"],
+    },
+)
+async def gmail_star_email(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        service = _get_gmail_service()
+        message_id = args["message_id"]
+        star = args.get("star", True)
+
+        if star:
+            body = {"addLabelIds": ["STARRED"]}
+        else:
+            body = {"removeLabelIds": ["STARRED"]}
+
+        service.users().messages().modify(
+            userId="me",
+            id=message_id,
+            body=body,
+        ).execute()
+
+        action = "starred" if star else "unstarred"
+        return _text(f"Message {message_id} {action}.")
+    except Exception as e:
+        return _error(f"Failed to star email: {e}")
+
+
+# ---------------------------------------------------------------------------
+# 5. gmail_check_alerted — dedup helper for scheduled email alerts
 # ---------------------------------------------------------------------------
 _ALERTED_FILE_DEFAULT = "data/alerted_emails.json"
 _MAX_ALERTED_IDS = 500
@@ -295,5 +339,6 @@ GMAIL_TOOLS: list[SdkMcpTool] = [
     gmail_list_emails,
     gmail_get_email,
     gmail_mark_as_read,
+    gmail_star_email,
     gmail_check_alerted,
 ]

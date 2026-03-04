@@ -102,6 +102,10 @@ tasks:
 
 **Circuit breaker:** Tasks that fail 5 consecutive times are auto-paused with a DM notification.
 
+### Webhook Server
+
+When `WEBHOOK_ENABLED=true`, an optional HTTP webhook server starts on `WEBHOOK_PORT` (default `8081`) for external signal ingestion. External systems (e.g., monitoring alerts, CI/CD pipelines, IoT triggers) can send signals via `POST /webhook/signal` with Bearer token authentication (`WEBHOOK_SECRET`). The request body specifies a prompt and target Slack user IDs. The server reuses the existing tiered access model to determine which Claude model and MCP servers are available based on the target user's tier, then processes the prompt and DMs results to the specified users.
+
 ## Testing Conventions
 
 External modules (`slack_bolt`, `claude_agent_sdk`) must be mock-injected into `sys.modules` **before** importing source modules, due to import-time initialization. See `test_slack_app.py` and `test_claude_client.py` for the pattern:
@@ -151,3 +155,6 @@ Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional
 - `FLIGHT_WATCH_FILE` — path to flight watch data file (default `data/flight_watches.json`)
 - `SEATS_AERO_API_KEY` — seats.aero Partner API key for award flight availability search
 - `PLAYWRIGHT_ENABLED` — set to `true` to enable the Playwright browser automation MCP
+- `WEBHOOK_ENABLED` — set to `true` to enable the HTTP webhook server for external signal ingestion
+- `WEBHOOK_PORT` — port for the webhook server (default `8081`)
+- `WEBHOOK_SECRET` — Bearer token secret for authenticating webhook requests

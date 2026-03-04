@@ -92,8 +92,9 @@ async def scheduler_get_task(args: dict[str, Any]) -> dict[str, Any]:
             "output": {"type": "string", "enum": ["dm", "silent"], "description": "Output mode: 'dm' sends results as Slack DM, 'silent' discards output."},
             "model": {"type": "string", "description": "Claude model to use (default: sonnet)."},
             "run_once": {"type": "boolean", "description": "If true, the task will auto-disable after its first successful execution. Use for one-time tasks."},
+            "created_by": {"type": "string", "description": "Slack user ID of the task creator. Required for permission validation."},
         },
-        "required": ["id", "name", "prompt"],
+        "required": ["id", "name", "prompt", "created_by"],
     },
 )
 async def scheduler_add_task(args: dict[str, Any]) -> dict[str, Any]:
@@ -125,6 +126,7 @@ async def scheduler_add_task(args: dict[str, Any]) -> dict[str, Any]:
             "model": {"type": "string"},
             "enabled": {"type": "boolean"},
             "run_once": {"type": "boolean", "description": "If true, the task will auto-disable after its first successful execution."},
+            "created_by": {"type": "string", "description": "Slack user ID of the task owner (for ownership transfer)."},
         },
         "required": ["task_id"],
     },

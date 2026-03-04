@@ -42,6 +42,19 @@ async def main() -> None:
             )
         await scheduler.start()
 
+    webhook_runner = None
+    if config.webhook_enabled:
+        from aiohttp import web
+
+        from .webhook import create_webhook_app
+
+        webhook_app = create_webhook_app(config, manager)
+        webhook_runner = web.AppRunner(webhook_app)
+        await webhook_runner.setup()
+        site = web.TCPSite(webhook_runner, "0.0.0.0", config.webhook_port)
+        await site.start()
+        logger.info("Webhook server started on port %d", config.webhook_port)
+
     rate_limiter = RateLimiter(config.rate_limit_messages, config.rate_limit_window_seconds)
     app = create_app(config, manager, rate_limiter)
     handler = AsyncSocketModeHandler(app, config.slack_app_token)
@@ -50,6 +63,8 @@ async def main() -> None:
 
     async def shutdown() -> None:
         logger.info("Shutting down...")
+        if webhook_runner is not None:
+            await webhook_runner.cleanup()
         if scheduler is not None:
             await scheduler.stop()
         await manager.stop()

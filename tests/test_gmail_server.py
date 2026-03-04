@@ -47,6 +47,7 @@ from src.mcp.gmail_server import _extract_body
 _list_emails = gmail_server.gmail_list_emails.handler
 _get_email = gmail_server.gmail_get_email.handler
 _mark_as_read = gmail_server.gmail_mark_as_read.handler
+_star_email = gmail_server.gmail_star_email.handler
 
 
 def _parse_text(result: dict[str, Any]) -> str:
@@ -287,3 +288,60 @@ class TestGmailMarkAsRead:
         result = await _mark_as_read({"message_id": "msg789"})
         assert _is_error(result)
         assert "Failed to mark as read" in _parse_text(result)
+
+
+# ---------------------------------------------------------------------------
+# gmail_star_email
+# ---------------------------------------------------------------------------
+class TestGmailStarEmail:
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_stars_email(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+        service.users().messages().modify().execute.return_value = {}
+
+        result = await _star_email({"message_id": "msg123"})
+
+        assert not _is_error(result)
+        assert "starred" in _parse_text(result)
+        service.users().messages().modify.assert_called_with(
+            userId="me", id="msg123", body={"addLabelIds": ["STARRED"]},
+        )
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_unstars_email(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+        service.users().messages().modify().execute.return_value = {}
+
+        result = await _star_email({"message_id": "msg123", "star": False})
+
+        assert not _is_error(result)
+        assert "unstarred" in _parse_text(result)
+        service.users().messages().modify.assert_called_with(
+            userId="me", id="msg123", body={"removeLabelIds": ["STARRED"]},
+        )
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_star_defaults_to_true(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+        service.users().messages().modify().execute.return_value = {}
+
+        result = await _star_email({"message_id": "msg456"})
+
+        assert not _is_error(result)
+        assert "starred" in _parse_text(result)
+        assert "unstarred" not in _parse_text(result)
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_error_handling(self, mock_get_svc: MagicMock) -> None:
+        mock_get_svc.side_effect = Exception("API error")
+
+        result = await _star_email({"message_id": "msg789"})
+        assert _is_error(result)
+        assert "Failed to star email" in _parse_text(result)
