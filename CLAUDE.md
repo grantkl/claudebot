@@ -116,6 +116,23 @@ from src.slack_app import create_app  # must come after mocks
 
 Use `AsyncMock` for async methods, `MagicMock` for sync. Config is mocked via `_make_config()` helpers returning `MagicMock` with attributes set. Environment variable tests use `@patch.dict("os.environ", {...}, clear=True)`.
 
+## Slack App OAuth Scopes
+
+The bot requires these OAuth scopes (configured at https://api.slack.com/apps under **OAuth & Permissions**). After changing scopes, reinstall the app to the workspace.
+
+| Scope | Purpose |
+|---|---|
+| `app_mentions:read` | Receive @mention events |
+| `channels:history` | Read messages in public channels (thread context hydration) |
+| `chat:write` | Post replies |
+| `files:read` | Download file attachments (images, text files) |
+| `files:write` | Upload large code blocks as file snippets |
+| `groups:history` | Read messages in private channels |
+| `im:history` | Read DM messages |
+| `im:write` | Open DM conversations (scheduler task result delivery) |
+| `reactions:read` | Read reactions |
+| `reactions:write` | Add/remove hourglass reaction while processing |
+
 ## Configuration
 
 Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional. See `.env.example` for the full list.
