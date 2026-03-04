@@ -2,6 +2,8 @@
 
 from src.message_utils import (
     CodeBlock,
+    ImageFile,
+    extract_image_paths,
     extract_large_code_blocks,
     format_error_message,
     format_file_attachments,
@@ -142,6 +144,69 @@ class TestFormatFileAttachments:
         files = [("notes.txt", "text/plain", "some notes")]
         result = format_file_attachments(files)
         assert result == "[Attached file: notes.txt]\n```\nsome notes\n```"
+
+
+class TestExtractImagePaths:
+    def test_detects_png_path(self):
+        text = "Here is a screenshot /tmp/screenshots/page.png for you"
+        modified, images = extract_image_paths(text)
+        assert len(images) == 1
+        assert images[0] == ImageFile(path="/tmp/screenshots/page.png", filename="page.png")
+        assert modified == "Here is a screenshot [Screenshot: page.png] for you"
+
+    def test_detects_jpeg_path(self):
+        text = "See /home/user/photo.jpeg"
+        modified, images = extract_image_paths(text)
+        assert len(images) == 1
+        assert images[0].filename == "photo.jpeg"
+        assert "[Screenshot: photo.jpeg]" in modified
+
+    def test_detects_jpg_path(self):
+        text = "Image at /var/data/img.jpg done"
+        modified, images = extract_image_paths(text)
+        assert len(images) == 1
+        assert images[0].filename == "img.jpg"
+
+    def test_replaces_with_placeholder(self):
+        text = "Result: /tmp/shot.png end"
+        modified, _ = extract_image_paths(text)
+        assert modified == "Result: [Screenshot: shot.png] end"
+        assert "/tmp/shot.png" not in modified
+
+    def test_returns_empty_list_when_no_paths(self):
+        text = "No images here, just plain text."
+        modified, images = extract_image_paths(text)
+        assert images == []
+        assert modified == text
+
+    def test_ignores_non_image_extensions(self):
+        text = "See /tmp/data.csv and /var/log/app.log"
+        modified, images = extract_image_paths(text)
+        assert images == []
+        assert modified == text
+
+    def test_ignores_relative_paths(self):
+        text = "Check out screenshots/page.png and ./local/img.jpg"
+        modified, images = extract_image_paths(text)
+        assert images == []
+        assert modified == text
+
+    def test_handles_multiple_screenshots(self):
+        text = "First /tmp/a.png then /tmp/b.jpeg and /tmp/c.jpg"
+        modified, images = extract_image_paths(text)
+        assert len(images) == 3
+        assert images[0].filename == "a.png"
+        assert images[1].filename == "b.jpeg"
+        assert images[2].filename == "c.jpg"
+        assert "[Screenshot: a.png]" in modified
+        assert "[Screenshot: b.jpeg]" in modified
+        assert "[Screenshot: c.jpg]" in modified
+
+    def test_case_insensitive_extension(self):
+        text = "Image /tmp/shot.PNG here"
+        modified, images = extract_image_paths(text)
+        assert len(images) == 1
+        assert images[0].filename == "shot.PNG"
 
 
 class TestExtractLargeCodeBlocks:
