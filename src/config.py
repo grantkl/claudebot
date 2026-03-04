@@ -29,6 +29,9 @@ class Config:
     scheduler_state_file: str = "data/scheduler_state.json"
     scheduler_concurrency: int = 3
     scheduler_timezone: str = "US/Pacific"
+    webhook_enabled: bool = False
+    webhook_port: int = 8081
+    webhook_secret: str = ""
 
 
 def load_config() -> Config:
@@ -92,4 +95,7 @@ def load_config() -> Config:
         scheduler_state_file=os.environ.get("SCHEDULER_STATE_FILE", "data/scheduler_state.json"),
         scheduler_concurrency=int(os.environ.get("SCHEDULER_CONCURRENCY", "3")),
         scheduler_timezone=os.environ.get("SCHEDULER_TIMEZONE", "US/Pacific"),
+        webhook_enabled=os.environ.get("WEBHOOK_ENABLED", "").lower() in ("1", "true", "yes"),
+        webhook_port=int(os.environ.get("WEBHOOK_PORT", "8081")),
+        webhook_secret=os.environ.get("WEBHOOK_SECRET", ""),
     )
