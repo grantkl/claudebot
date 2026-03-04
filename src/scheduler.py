@@ -246,19 +246,21 @@ class TaskScheduler:
         self, task: TaskDefinition, state: TaskState
     ) -> float | None:
         """Compute the next run time for a task."""
-        from datetime import datetime, timedelta
+        from datetime import datetime
 
         if task.cron:
             if state.last_run_time:
                 base = datetime.fromisoformat(state.last_run_time)
+                cron = croniter(task.cron, base.astimezone(self._tz))
+                next_dt = cron.get_next(datetime)
+                return next_dt.timestamp()
             else:
-                # Use a 60-second buffer so the scheduler loop (15s interval)
-                # can catch cron times that just arrived.  Without this,
-                # get_next(now) jumps past the current match once now > cron time.
-                base = datetime.now(tz=self._tz) - timedelta(seconds=60)
-            cron = croniter(task.cron, base.astimezone(self._tz))
-            next_dt = cron.get_next(datetime)
-            return next_dt.timestamp()
+                # Task has never run — find the most recent past cron match
+                # so it fires immediately as a catch-up.
+                now = datetime.now(tz=self._tz)
+                cron = croniter(task.cron, now)
+                prev_dt = cron.get_prev(datetime)
+                return prev_dt.timestamp()
         elif task.interval_seconds:
             if state.last_run_time:
                 last = datetime.fromisoformat(state.last_run_time)
