@@ -10,6 +10,18 @@ if TYPE_CHECKING:
     from claude_agent_sdk import McpServerConfig
 
 
+def _resolve_playwright_path() -> bool:
+    """Pre-install / verify the Playwright MCP package is available."""
+    try:
+        result = _subprocess.run(
+            ["npx", "--yes", "@playwright/mcp@latest", "--help"],
+            capture_output=True, text=True, timeout=30,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, _subprocess.TimeoutExpired):
+        return False
+
+
 def _resolve_amadeus_path() -> str | None:
     """Resolve the path to the amadeus MCP server's stdio entry point."""
     try:
@@ -81,5 +93,14 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
         servers["seats_aero"] = create_sdk_mcp_server(
             name="seats_aero", version="1.0.0", tools=SEATS_AERO_TOOLS
         )
+
+    playwright_enabled = os.environ.get("PLAYWRIGHT_ENABLED", "").lower() in ("1", "true", "yes")
+    if playwright_enabled:
+        if _resolve_playwright_path():
+            servers["playwright"] = {
+                "type": "stdio",
+                "command": "npx",
+                "args": ["--yes", "@playwright/mcp@latest", "--headless"],
+            }
 
     return servers

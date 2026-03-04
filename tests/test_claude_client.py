@@ -701,3 +701,85 @@ class TestClaudeManager:
         options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
         assert "You only have the tools explicitly provided" not in options.system_prompt
         assert "You have access to Gmail capabilities" in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_user_id_system_prompt_injected_with_scheduler(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"scheduler": "sched_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"scheduler"}, user_id="U123")
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "The current user's Slack ID is U123" in options.system_prompt
+        assert "created_by" in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_user_id_system_prompt_not_injected_without_scheduler(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"sonos": "sonos_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"sonos"}, user_id="U123")
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "current user" not in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_user_id_system_prompt_not_injected_when_user_id_none(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"scheduler": "sched_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"scheduler"}, user_id=None)
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "current user" not in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_playwright_system_prompt_included_when_playwright_in_mcp_server_names(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"playwright": "pw_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"playwright"})
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "browser automation" in options.system_prompt
+        assert "Playwright" in options.system_prompt
+
+    @pytest.mark.asyncio
+    async def test_playwright_prompt_not_included_without_playwright(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        manager._mcp_servers = {"sonos": "sonos_srv"}
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello", mcp_server_names={"sonos"})
+        call_kwargs = mock_cls.call_args
+        options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
+        assert "Playwright" not in options.system_prompt

@@ -99,9 +99,39 @@ tasks:
   name: Found North Lottery Signup Reminder
   prompt: Send a DM reminding the user to sign up for the Found North lottery today.
     Keep it brief and friendly.
+  cron: 0 9 3 3 *
+  mcp_servers: []
+  output: dm
+  model: sonnet
+  enabled: false
+  run_once: true
+- id: scheduler_timezone_reminder
+  name: Update Scheduler Timezone Code Reminder
+  prompt: 'Send a reminder: "Update the scheduler code to make timezone handling explicit.
+    Here''s the thread for context: https://ex-eg-and-friends.slack.com/archives/D0AJBDYK7GQ/p1772557861486429"'
+  cron: 0 17 3 3 *
+  mcp_servers: []
+  output: dm
+  model: haiku
+  enabled: false
+  run_once: true
+- id: reminder_scheduling_auth_users
+  name: 'Reminder: Add scheduling for authorized users'
+  prompt: "Send a reminder: \"\U0001F514 Reminder: Add scheduling to authorized users.\
+    \ Also \u2014 scheduled tasks should be sent to specific people (not broadcast).\""
+  cron: 0 1 4 3 *
+  mcp_servers: []
+  output: dm
+  model: sonnet
+  enabled: false
+  run_once: true
+- id: remind_enhance_5pm
+  name: 'Reminder: Enhance this'
+  prompt: 'Send a reminder: "Hey! Just a reminder to get back to enhancing that Flight
+    of the Conchords presale alert email flagging workflow you were working on."'
   cron: 0 17 3 3 *
   mcp_servers: []
   output: dm
   model: sonnet
-  enabled: true
+  enabled: false
   run_once: true
