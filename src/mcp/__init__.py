@@ -101,7 +101,7 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
             servers["playwright"] = {
                 "type": "stdio",
                 "command": "npx",
-                "args": ["--yes", "@playwright/mcp@latest", "--headless"],
+                "args": ["--yes", "@playwright/mcp@latest", "--headless", "--browser", "chromium"],
             }
 
     return servers
