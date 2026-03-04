@@ -100,6 +100,7 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                             headers={
                                 "Authorization": f"Bearer {config.slack_bot_token}"
                             },
+                            follow_redirects=True,
                         )
                         files_content.append(
                             (file["name"], mimetype, resp.text)
@@ -110,8 +111,13 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                             headers={
                                 "Authorization": f"Bearer {config.slack_bot_token}"
                             },
+                            follow_redirects=True,
                         )
-                        images.append((mimetype, resp.content))
+                        if resp.status_code == 200 and resp.content:
+                            images.append((mimetype, resp.content))
+                        else:
+                            logger.warning("Failed to download image %s: HTTP %d", file["name"], resp.status_code)
+                            cleaned_text += f"\n\n[Attached image: {file['name']} - failed to download]"
                     else:
                         cleaned_text += f"\n\n[Attached file: {file['name']} ({mimetype}) - binary file, contents not included]"
             if files_content:

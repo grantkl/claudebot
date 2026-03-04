@@ -435,6 +435,7 @@ class TestSlackApp:
 
         mock_response = MagicMock()
         mock_response.content = b"fake-png-bytes"
+        mock_response.status_code = 200
         mock_http_client = AsyncMock()
         mock_http_client.get = AsyncMock(return_value=mock_response)
         mock_http_client.__aenter__ = AsyncMock(return_value=mock_http_client)
@@ -472,8 +473,10 @@ class TestSlackApp:
 
         png_response = MagicMock()
         png_response.content = b"png-bytes"
+        png_response.status_code = 200
         jpeg_response = MagicMock()
         jpeg_response.content = b"jpeg-bytes"
+        jpeg_response.status_code = 200
 
         mock_http_client = AsyncMock()
         mock_http_client.get = AsyncMock(side_effect=[png_response, jpeg_response])
@@ -554,8 +557,10 @@ class TestSlackApp:
 
         text_response = MagicMock()
         text_response.text = "file content here"
+        text_response.status_code = 200
         image_response = MagicMock()
         image_response.content = b"gif-bytes"
+        image_response.status_code = 200
 
         mock_http_client = AsyncMock()
         mock_http_client.get = AsyncMock(side_effect=[text_response, image_response])
@@ -631,6 +636,7 @@ class TestSlackApp:
         for mt in mimetypes:
             r = MagicMock()
             r.content = f"{mt}-bytes".encode()
+            r.status_code = 200
             responses.append(r)
 
         mock_http_client = AsyncMock()
