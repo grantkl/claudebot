@@ -167,6 +167,25 @@ class ClaudeManager:
                     " Use award_trip_details to get flight segments,"
                     " times, and booking links for a specific result from a cached search."
                 )
+            if mcp_server_names and "stocks" in mcp_server_names:
+                system_prompt += (
+                    "\n\nYou have access to stock market data via MCP tools."
+                    " Available tools: stock_quote (current price/fundamentals),"
+                    " options_expirations (available expiry dates),"
+                    " options_chain (calls/puts with greeks for a given expiration),"
+                    " stock_technicals (SMA, RSI, MACD, Bollinger Bands)."
+                    " For options analysis, use this workflow: stock_quote first"
+                    " (get current price), then stock_technicals (trend/momentum),"
+                    " then options_chain (specific strikes). Be direct and"
+                    " concise — the user wants actionable analysis, not disclaimers."
+                )
+            if mcp_server_names and "web_search" in mcp_server_names:
+                system_prompt += (
+                    "\n\nYou have access to web search via Brave Search MCP tools."
+                    " Use this for current news, earnings dates, analyst ratings,"
+                    " macro events, and any real-time information not available"
+                    " through other tools."
+                )
             if set(mcp_servers) != set(self._mcp_servers):
                 system_prompt += (
                     "\n\nYou only have the tools explicitly provided to you."

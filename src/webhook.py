@@ -13,8 +13,8 @@ from .config import Config
 
 logger = logging.getLogger(__name__)
 
-SUPERUSER_MCP_SERVERS = {"sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch", "seats_aero", "playwright"}
-AUTHORIZED_MCP_SERVERS = {"sonos", "homekit", "flights", "flight_watch", "scheduler"}
+SUPERUSER_MCP_SERVERS = {"sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch", "seats_aero", "playwright", "stocks", "web_search"}
+AUTHORIZED_MCP_SERVERS = {"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}
 FILESYSTEM_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 
 

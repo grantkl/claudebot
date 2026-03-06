@@ -121,7 +121,7 @@ class TestNextRunComputation:
         tasks = [_sample_task_data()]
         scheduler = _make_scheduler(tmp_path, tasks=tasks)
         task = scheduler._tasks["test_task"]
-        last_run_str = "2026-03-01T10:00:00-0800"
+        last_run_str = "2026-03-01T10:00:00-08:00"
         state = TaskState(last_run_time=last_run_str)
         next_run = scheduler._compute_next_run(task, state)
         last_dt = datetime.fromisoformat(last_run_str)
@@ -350,7 +350,7 @@ class TestStatePersistence:
 
         # Modify state
         scheduler._state["test_task"] = TaskState(
-            last_run_time="2026-03-01T10:00:00-0800",
+            last_run_time="2026-03-01T10:00:00-08:00",
             consecutive_failures=2,
             paused=True,
         )
@@ -364,7 +364,7 @@ class TestStatePersistence:
         scheduler2 = TaskScheduler(config, claude_manager, "xoxb-test", tasks_file, state_file)
 
         state = scheduler2._state["test_task"]
-        assert state.last_run_time == "2026-03-01T10:00:00-0800"
+        assert state.last_run_time == "2026-03-01T10:00:00-08:00"
         assert state.consecutive_failures == 2
         assert state.paused is True
 
