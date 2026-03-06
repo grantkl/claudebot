@@ -50,6 +50,18 @@ def _make_rate_limiter(allowed=True):
     return rl
 
 
+def _make_client():
+    client = AsyncMock()
+    client.auth_test = AsyncMock(return_value={"user_id": "B001"})
+    client.reactions_add = AsyncMock()
+    client.reactions_remove = AsyncMock()
+    client.users_info = AsyncMock(return_value={
+        "user": {"profile": {"display_name": "TestUser", "real_name": "Test User"}}
+    })
+    client.files_upload_v2 = AsyncMock()
+    return client
+
+
 def _make_event(**overrides):
     base = {
         "user": "U001",
@@ -103,10 +115,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="Claude response")
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, _make_rate_limiter())
@@ -128,6 +137,7 @@ class TestSlackApp:
             model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
+            user_name="TestUser",
         )
 
         # Response posted
@@ -147,10 +157,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="dm response")
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, _make_rate_limiter())
@@ -173,10 +180,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(side_effect=RuntimeError("boom"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, _make_rate_limiter())
@@ -202,10 +206,7 @@ class TestSlackApp:
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, rate_limiter)
@@ -219,6 +220,7 @@ class TestSlackApp:
             model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
+            user_name="TestUser",
         )
         rate_limiter.check_and_record.assert_not_called()
 
@@ -230,10 +232,7 @@ class TestSlackApp:
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter(allowed=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, rate_limiter)
@@ -249,6 +248,7 @@ class TestSlackApp:
             disallowed_tools=_NON_SUPERUSER_DISALLOWED,
             authorized=False, superuser=False,
             user_id="U001",
+            user_name="TestUser",
         )
 
     @pytest.mark.asyncio
@@ -282,10 +282,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="response")
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, _make_rate_limiter())
@@ -320,10 +317,7 @@ class TestSlackApp:
         claude_manager.has_session = MagicMock(return_value=False)
         claude_manager.send_message = AsyncMock(return_value="response")
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
         client.conversations_replies = AsyncMock(return_value={
             "messages": [
                 {"user": "U001", "text": "first msg"},
@@ -357,10 +351,7 @@ class TestSlackApp:
         claude_manager.has_session = MagicMock(return_value=True)
         claude_manager.send_message = AsyncMock(return_value="response")
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
         client.conversations_replies = AsyncMock()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
@@ -379,6 +370,7 @@ class TestSlackApp:
             model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
+            user_name="TestUser",
         )
 
     @pytest.mark.asyncio
@@ -388,10 +380,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="response")
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         mock_response = MagicMock()
         mock_response.text = '{"key": "value"}'
@@ -428,10 +417,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="I see an image")
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         mock_response = MagicMock()
         mock_response.content = b"fake-png-bytes"
@@ -466,10 +452,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="I see images")
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         png_response = MagicMock()
         png_response.content = b"png-bytes"
@@ -518,10 +501,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="response")
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, _make_rate_limiter())
@@ -550,10 +530,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="response")
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         text_response = MagicMock()
         text_response.text = "file content here"
@@ -603,10 +580,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="response")
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, _make_rate_limiter())
@@ -626,10 +600,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value="response")
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         mimetypes = ["image/png", "image/jpeg", "image/gif", "image/webp"]
         responses = []
@@ -677,11 +648,7 @@ class TestSlackApp:
         claude_manager.send_message = AsyncMock(return_value=response_text)
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
-        client.files_upload_v2 = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, _make_rate_limiter())
@@ -707,10 +674,7 @@ class TestSlackApp:
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter(allowed=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, rate_limiter)
@@ -725,6 +689,7 @@ class TestSlackApp:
             disallowed_tools=_NON_SUPERUSER_DISALLOWED,
             authorized=False, superuser=False,
             user_id="U001",
+            user_name="TestUser",
         )
 
     @pytest.mark.asyncio
@@ -735,10 +700,7 @@ class TestSlackApp:
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, rate_limiter)
@@ -752,6 +714,7 @@ class TestSlackApp:
             model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
+            user_name="TestUser",
         )
 
     @pytest.mark.asyncio
@@ -764,10 +727,7 @@ class TestSlackApp:
         claude_manager.remove_session = AsyncMock()
         rate_limiter = _make_rate_limiter(allowed=True)
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, rate_limiter)
@@ -783,6 +743,7 @@ class TestSlackApp:
             disallowed_tools=_NON_SUPERUSER_DISALLOWED,
             authorized=False, superuser=False,
             user_id="U001",
+            user_name="TestUser",
         )
 
     @pytest.mark.asyncio
@@ -796,10 +757,7 @@ class TestSlackApp:
         claude_manager.remove_session = AsyncMock()
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, rate_limiter)
@@ -818,10 +776,7 @@ class TestSlackApp:
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, rate_limiter)
@@ -835,6 +790,7 @@ class TestSlackApp:
             model="opus", mcp_server_names={"sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch", "seats_aero", "playwright", "stocks", "web_search"}, images=None,
             disallowed_tools=None, authorized=True, superuser=True,
             user_id="U001",
+            user_name="TestUser",
         )
         rate_limiter.check_and_record.assert_not_called()
 
@@ -846,10 +802,7 @@ class TestSlackApp:
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, rate_limiter)
@@ -863,6 +816,7 @@ class TestSlackApp:
             model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
+            user_name="TestUser",
         )
 
     @pytest.mark.asyncio
@@ -876,10 +830,7 @@ class TestSlackApp:
         claude_manager.remove_session = AsyncMock()
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
-        client = AsyncMock()
-        client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-        client.reactions_add = AsyncMock()
-        client.reactions_remove = AsyncMock()
+        client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
             app = create_app(config, claude_manager, rate_limiter)
@@ -894,4 +845,5 @@ class TestSlackApp:
             model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
+            user_name="TestUser",
         )

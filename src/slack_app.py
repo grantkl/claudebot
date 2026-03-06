@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: RateLimiter) -> AsyncApp:
     app = AsyncApp(token=config.slack_bot_token)
     bot_info: dict[str, str | None] = {"id": None}
+    user_names: dict[str, str] = {}
 
     _SKIP_SUBTYPES = {"message_changed", "message_deleted", "message_replied", "channel_join", "channel_leave"}
 
@@ -125,6 +126,15 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         elif authorized and not superuser and claude_manager.is_superuser_session(thread_ts):
             await claude_manager.remove_session(thread_ts)
 
+        user_id = event["user"]
+        if user_id not in user_names:
+            try:
+                info = await client.users_info(user=user_id)
+                profile = info["user"].get("profile", {})
+                user_names[user_id] = profile.get("display_name") or profile.get("real_name") or user_id
+            except Exception:
+                user_names[user_id] = user_id
+
         await client.reactions_add(
             name="hourglass_flowing_sand",
             channel=event["channel"],
@@ -139,7 +149,8 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                 disallowed_tools=disallowed_tools,
                 authorized=authorized,
                 superuser=superuser,
-                user_id=event["user"],
+                user_id=user_id,
+                user_name=user_names.get(user_id),
             )
 
             # Extract large code blocks and post as files

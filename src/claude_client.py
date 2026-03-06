@@ -75,7 +75,7 @@ class ClaudeManager:
     async def remove_session(self, thread_ts: str) -> None:
         await self._remove_session(thread_ts)
 
-    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None) -> str:
+    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None, user_name: str | None = None) -> str:
         is_new_session = thread_ts not in self._sessions
         if is_new_session:
             system_prompt = self._config.claude_system_prompt
@@ -217,7 +217,7 @@ class ClaudeManager:
                 "Session %s hydrated with thread context (%d chars): %s",
                 thread_ts, len(thread_context), thread_context[:500],
             )
-        logger.info("Session %s query (%d chars): %s", thread_ts, len(query_text), query_text[:500])
+        logger.info("Session %s user=%s query (%d chars): %s", thread_ts, user_name or user_id or "unknown", len(query_text), query_text[:500])
 
         entry = self._sessions[thread_ts]
         async with entry.lock:
