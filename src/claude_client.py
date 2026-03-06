@@ -243,7 +243,8 @@ class ClaudeManager:
                         break
                 text = "".join(response_parts)
                 if screenshot_paths:
-                    new_paths = [p for p in screenshot_paths if p not in text]
+                    unique = list(dict.fromkeys(screenshot_paths))
+                    new_paths = [p for p in unique if p not in text]
                     if new_paths:
                         text += "\n" + "\n".join(new_paths)
                 return text
