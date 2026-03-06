@@ -104,4 +104,18 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
                 "args": ["--yes", "@playwright/mcp@latest", "--headless", "--browser", "chromium"],
             }
 
+    stocks_enabled = os.environ.get("STOCKS_ENABLED", "").lower() in ("1", "true", "yes")
+    if stocks_enabled:
+        from .stocks_server import STOCKS_TOOLS
+        servers["stocks"] = create_sdk_mcp_server(name="stocks", version="1.0.0", tools=STOCKS_TOOLS)
+
+    brave_api_key = os.environ.get("BRAVE_API_KEY", "")
+    if brave_api_key:
+        servers["web_search"] = {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["--yes", "@modelcontextprotocol/server-brave-search"],
+            "env": {"BRAVE_API_KEY": brave_api_key},
+        }
+
     return servers

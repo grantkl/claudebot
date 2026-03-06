@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 NOTHING_TO_REPORT = "NOTHING_TO_REPORT"
 
-SUPERUSER_MCP_SERVERS = {"sonos", "homekit", "gmail", "flights", "flight_watch", "seats_aero", "playwright"}
-AUTHORIZED_MCP_SERVERS = {"sonos", "homekit", "flights", "flight_watch", "scheduler"}
+SUPERUSER_MCP_SERVERS = {"sonos", "homekit", "gmail", "flights", "flight_watch", "seats_aero", "playwright", "stocks", "web_search"}
+AUTHORIZED_MCP_SERVERS = {"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}
 
 
 @dataclass
@@ -67,6 +67,7 @@ class TaskScheduler:
         self._loop_task: asyncio.Task[None] | None = None
         self._semaphore = asyncio.Semaphore(config.scheduler_concurrency)
         self._in_flight: set[asyncio.Task[None]] = set()
+        self._executing_ids: set[str] = set()
         self._tz = ZoneInfo(config.scheduler_timezone)
 
         self._load_tasks()
@@ -178,8 +179,11 @@ class TaskScheduler:
                     state = self._state.get(task_id, TaskState())
                     if state.paused:
                         continue
+                    if task_id in self._executing_ids:
+                        continue
                     next_run = self._compute_next_run(task, state)
                     if next_run is not None and next_run <= now:
+                        self._executing_ids.add(task_id)
                         t = asyncio.create_task(self._execute_with_semaphore(task))
                         self._in_flight.add(t)
                         t.add_done_callback(self._in_flight.discard)
@@ -261,6 +265,7 @@ class TaskScheduler:
                     user_id=task.created_by,
                 )
         finally:
+            self._executing_ids.discard(task_id)
             await self._claude_manager.remove_session(thread_ts)
             self._save_state()
 

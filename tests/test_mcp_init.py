@@ -13,6 +13,7 @@ sys.modules.setdefault("src.mcp.sonos_server", MagicMock())
 sys.modules.setdefault("src.mcp.homekit_server", MagicMock())
 sys.modules.setdefault("src.mcp.gmail_server", MagicMock())
 sys.modules.setdefault("src.mcp.flight_watch_server", MagicMock())
+sys.modules.setdefault("src.mcp.stocks_server", MagicMock())
 
 from src.mcp import _resolve_amadeus_path, _resolve_playwright_path, build_mcp_servers  # noqa: E402
 
@@ -136,3 +137,32 @@ class TestResolvePlaywrightPath:
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="npx", timeout=30)
         result = _resolve_playwright_path()
         assert result is False
+
+
+class TestBuildMcpServersStocks:
+    @patch.dict("os.environ", {"STOCKS_ENABLED": "true"}, clear=False)
+    def test_stocks_enabled(self):
+        servers = build_mcp_servers()
+        assert "stocks" in servers
+
+    @patch.dict("os.environ", {"STOCKS_ENABLED": "false"}, clear=False)
+    def test_stocks_disabled(self):
+        servers = build_mcp_servers()
+        assert "stocks" not in servers
+
+
+class TestBuildMcpServersWebSearch:
+    @patch.dict("os.environ", {"BRAVE_API_KEY": "test-key"}, clear=False)
+    def test_web_search_enabled(self):
+        servers = build_mcp_servers()
+        assert "web_search" in servers
+        assert servers["web_search"]["type"] == "stdio"
+        assert servers["web_search"]["command"] == "npx"
+        assert servers["web_search"]["env"]["BRAVE_API_KEY"] == "test-key"
+
+    @patch.dict("os.environ", {}, clear=False)
+    def test_web_search_disabled_no_key(self):
+        import os
+        os.environ.pop("BRAVE_API_KEY", None)
+        servers = build_mcp_servers()
+        assert "web_search" not in servers
