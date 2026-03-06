@@ -1,6 +1,6 @@
 # claudebot
 
-Slack bot powered by the Claude Agent SDK with three-tier access control and MCP integrations for smart home, email, flights, browser automation, and scheduled automation. Also exposes an HTTP webhook for external signal ingestion.
+Slack bot powered by the Claude Agent SDK with three-tier access control and MCP integrations for smart home, email, flights, stocks, web search, browser automation, and scheduled automation. Also exposes an HTTP webhook for external signal ingestion.
 
 ## Quick Start
 
@@ -17,8 +17,8 @@ docker compose logs -f claudebot
 **Access tiers** (set via env vars, nobody is rejected):
 
 - **Superuser** (`SUPERUSER_IDS`) -- opus model, all MCP servers, no restrictions
-- **Authorized** (`AUTHORIZED_USER_IDS`) -- sonnet model, Sonos/HomeKit/Flights/Flight Watch/Scheduler, filesystem tools blocked
-- **Everyone else** -- haiku model, no MCP servers, filesystem tools blocked, rate limited
+- **Authorized** (`AUTHORIZED_USER_IDS`) -- sonnet model, Sonos/HomeKit/Flights/Flight Watch/Scheduler/Stocks/Web Search, filesystem tools blocked
+- **Everyone else** -- haiku model, Stocks/Web Search, filesystem tools blocked, rate limited
 
 **Feature flags:**
 
@@ -30,6 +30,8 @@ docker compose logs -f claudebot
 | `FLIGHTS_ENABLED=true` | Flight search + price watches | `AMADEUS_CLIENT_ID`, `AMADEUS_CLIENT_SECRET` |
 | `SEATS_AERO_API_KEY` | Award flight availability search (superuser) | Partner API key from seats.aero |
 | `PLAYWRIGHT_ENABLED=true` | Browser automation (superuser) | Runs headless via npx |
+| `STOCKS_ENABLED=true` | Stock quotes, options chains, technicals (all tiers) | No API key required |
+| `BRAVE_API_KEY` | Web search via Brave Search API (all tiers) | Key from https://brave.com/search/api/ |
 | `WEBHOOK_ENABLED=true` | HTTP webhook for external signals | `WEBHOOK_PORT`, `WEBHOOK_SECRET` |
 
 ## Features
@@ -43,6 +45,8 @@ docker compose logs -f claudebot
 - **Flight Watch MCP** — monitor flight prices with automatic periodic checks; track booked itineraries by airline and flight number
 - **Seats Aero MCP** — search award flight availability across 24 loyalty programs (superuser-only)
 - **Playwright MCP** — full browser automation: navigate, click, fill forms, take screenshots (superuser-only, headless)
+- **Stocks MCP** — real-time stock quotes, options chains, and technical indicators via yfinance (all tiers)
+- **Web Search MCP** — web search via Brave Search API for news, earnings, and current events (all tiers)
 - **Scheduler** — autonomous cron/interval tasks with circuit breaker, task ownership, run-once support, and Slack DM delivery
 - **Webhook server** — HTTP endpoint (`POST /webhook/signal`) for external systems to send signals for Claude analysis and Slack DM delivery, with Bearer token auth and tier-based access
 - **File attachments** — reads text files and images from Slack messages, passes images to Claude as multimodal input
@@ -94,6 +98,7 @@ src/                    # application code
     scheduler_server.py #     scheduler task management tools
     flight_watch_server.py #  flight price watch management
     seats_aero_server.py #    award flight availability search
+    stocks_server.py    #     stock quotes, options, technicals
 config/tasks.yaml       # scheduler task definitions
 data/                   # runtime state (scheduler, flight watches, alerted emails)
 proxy/                  # nginx auth-proxy config
