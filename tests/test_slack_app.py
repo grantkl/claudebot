@@ -191,7 +191,7 @@ class TestSlackApp:
 
         # Error message posted
         say.assert_called_once_with(
-            text="I encountered an error processing your request. Please try again.",
+            text="I encountered an error processing your request (`RuntimeError`). Please try again.",
             thread_ts=event["ts"],
         )
 

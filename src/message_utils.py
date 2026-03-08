@@ -65,8 +65,9 @@ def split_message(text: str, max_length: int = 3900) -> list[str]:
 
 
 def format_error_message(error: Exception) -> str:
-    """Return a user-friendly error message."""
-    return "I encountered an error processing your request. Please try again."
+    """Return a user-friendly error message with the exception type."""
+    error_type = type(error).__name__
+    return f"I encountered an error processing your request (`{error_type}`). Please try again."
 
 
 def format_thread_context(messages: list[dict[str, str]], bot_user_id: str) -> str:

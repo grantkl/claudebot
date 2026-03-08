@@ -75,7 +75,7 @@ class ClaudeManager:
     async def remove_session(self, thread_ts: str) -> None:
         await self._remove_session(thread_ts)
 
-    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None, user_name: str | None = None) -> str:
+    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None, user_name: str | None = None, _retry: bool = True) -> str:
         is_new_session = thread_ts not in self._sessions
         if is_new_session:
             system_prompt = self._config.claude_system_prompt
@@ -268,10 +268,23 @@ class ClaudeManager:
                         text += "\n" + "\n".join(new_paths)
                 return text
             except Exception:
-                logger.exception(
-                    "Error in Claude session for thread %s", thread_ts
-                )
                 await self._remove_session(thread_ts)
+                if _retry:
+                    logger.warning(
+                        "Session error for thread %s, retrying with fresh session",
+                        thread_ts,
+                    )
+                    return await self.send_message(
+                        thread_ts, text, thread_context=thread_context,
+                        model=model, mcp_server_names=mcp_server_names,
+                        images=images, disallowed_tools=disallowed_tools,
+                        authorized=authorized, superuser=superuser,
+                        user_id=user_id, user_name=user_name, _retry=False,
+                    )
+                logger.exception(
+                    "Error in Claude session for thread %s (retry exhausted)",
+                    thread_ts,
+                )
                 raise
 
     async def _cleanup_loop(self) -> None:
