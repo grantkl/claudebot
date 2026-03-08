@@ -79,6 +79,14 @@ class ClaudeManager:
         is_new_session = thread_ts not in self._sessions
         if is_new_session:
             system_prompt = self._config.claude_system_prompt
+            system_prompt += (
+                " Your responses are posted as Slack messages."
+                " Large code blocks (50+ lines) in your response are automatically"
+                " extracted and uploaded as file snippets in the Slack thread."
+                " You CAN and SHOULD include large code blocks when helpful — they"
+                " will be uploaded to Slack for the user. Never tell the user you"
+                " cannot upload or share files in Slack."
+            )
             if mcp_server_names:
                 mcp_servers = {k: v for k, v in self._mcp_servers.items() if k in mcp_server_names}
             else:
