@@ -153,7 +153,7 @@ class TestClaudeManager:
         assert manager._sessions["t1"].client is entry.client
 
     @pytest.mark.asyncio
-    async def test_error_handling_removes_broken_session(self):
+    async def test_error_handling_retries_then_raises(self):
         config = _make_config()
         manager = ClaudeManager(config)
 
@@ -164,7 +164,31 @@ class TestClaudeManager:
             with pytest.raises(RuntimeError, match="boom"):
                 await manager.send_message("t1", "hello")
 
+        # Session removed after both attempts fail
         assert "t1" not in manager._sessions
+        # query called twice: initial + retry
+        assert fake_client.query.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_error_handling_retry_succeeds(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+
+        fail_client = _FakeClaudeSDKClient()
+        fail_client.query = AsyncMock(side_effect=RuntimeError("disconnect"))
+
+        ok_client = _FakeClaudeSDKClient()
+        ok_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="recovered")]),
+            _FakeResultMessage(),
+        ])
+
+        clients = iter([fail_client, ok_client])
+        with patch("src.claude_client.ClaudeSDKClient", side_effect=lambda **kw: next(clients)):
+            result = await manager.send_message("t1", "hello")
+
+        assert result == "recovered"
+        assert "t1" in manager._sessions
 
     @pytest.mark.asyncio
     async def test_cleanup_evicts_old_sessions(self):

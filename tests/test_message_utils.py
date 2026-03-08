@@ -80,7 +80,7 @@ class TestFormatErrorMessage:
     def test_returns_user_friendly_string(self):
         error = RuntimeError("something broke")
         result = format_error_message(error)
-        assert result == "I encountered an error processing your request. Please try again."
+        assert result == "I encountered an error processing your request (`RuntimeError`). Please try again."
 
 
 class TestFormatThreadContext:
