@@ -104,6 +104,13 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
                 "args": ["--yes", "@playwright/mcp@latest", "--headless", "--browser", "chromium"],
             }
 
+    shopping_list_enabled = os.environ.get("SHOPPING_LIST_ENABLED", "").lower() in ("1", "true", "yes")
+    if shopping_list_enabled:
+        from .shopping_list_server import SHOPPING_LIST_TOOLS
+        servers["shopping_list"] = create_sdk_mcp_server(
+            name="shopping_list", version="1.0.0", tools=SHOPPING_LIST_TOOLS
+        )
+
     stocks_enabled = os.environ.get("STOCKS_ENABLED", "").lower() in ("1", "true", "yes")
     if stocks_enabled:
         from .stocks_server import STOCKS_TOOLS

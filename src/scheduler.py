@@ -225,7 +225,7 @@ class TaskScheduler:
         logger.info("Executing scheduled task: %s (%s)", task.name, task_id)
 
         try:
-            response = await self._claude_manager.send_message(
+            result = await self._claude_manager.send_message(
                 thread_ts,
                 prompt,
                 model=task.model,
@@ -233,6 +233,7 @@ class TaskScheduler:
                 authorized=authorized,
                 superuser=superuser,
             )
+            response = result.text
 
             state.last_run_time = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             state.consecutive_failures = 0

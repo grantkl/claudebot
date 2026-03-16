@@ -49,8 +49,8 @@ Three tiers, determined by `SUPERUSER_IDS` and `AUTHORIZED_USER_IDS` env vars. N
 
 | Tier | Model | MCP Servers | Blocked Tools | Rate Limited |
 |---|---|---|---|---|
-| Superuser | opus | sonos + homekit + gmail + scheduler + flights + flight_watch + seats_aero + playwright + stocks + web_search | None | No |
-| Authorized | sonnet | sonos + homekit + flights + flight_watch + scheduler + stocks + web_search | Bash, Read, Edit, Write, Glob, Grep | No |
+| Superuser | opus | sonos + homekit + gmail + scheduler + flights + flight_watch + seats_aero + playwright + stocks + web_search + shopping_list | None | No |
+| Authorized | sonnet | sonos + homekit + flights + flight_watch + scheduler + playwright + stocks + web_search + shopping_list | Bash, Read, Edit, Write, Glob, Grep | No |
 | Everyone else | haiku | stocks + web_search | Bash, Read, Edit, Write, Glob, Grep | Yes |
 
 **Security:** Non-superuser tiers have filesystem tools blocked to prevent capability discovery (e.g., reading source code to find that Gmail MCP exists). When a session has fewer MCP servers than what's available globally, a generic system prompt instructs Claude not to mention or suggest unavailable capabilities. Session eviction prevents a lower-tier user from inheriting a higher-tier session in the same thread.
@@ -75,6 +75,7 @@ When `ENABLE_MCP=true`, MCP servers are built once at startup and selectively in
 - **Flight Watch** — conditionally loaded when `FLIGHTS_ENABLED=true`; manages flight price watches with automatic periodic checks. Supports both route-based watches (origin/destination on flexible dates) and specific flight tracking by airline and flight number for booked itineraries. Superuser and authorized tiers. Tools: flight_watch_add, flight_watch_list, flight_watch_remove, flight_watch_record, flight_watch_history.
 - **Seats Aero** — conditionally loaded when `SEATS_AERO_API_KEY` is set; searches award flight availability across 24 loyalty programs via the seats.aero Partner API. Independent of FLIGHTS_ENABLED. Superuser-only. Tools: award_search, award_trip_details.
 - **Playwright** — conditionally loaded when `PLAYWRIGHT_ENABLED=true`; provides full browser automation via `@playwright/mcp` (subprocess stdio, runs headless via npx). Superuser-only. Enables navigating to URLs, clicking elements, filling forms, taking screenshots, and interacting with web pages.
+- **Shopping List** — conditionally loaded when `SHOPPING_LIST_ENABLED=true`; manages a shared shopping list with JSON persistence and recipe storage. Available to superuser and authorized tiers. Tools: shopping_list_add, shopping_list_view, shopping_list_remove, shopping_list_check, shopping_list_uncheck, shopping_list_clear, recipe_save, recipe_list, recipe_view, recipe_delete.
 - **Stocks** — conditionally loaded when `STOCKS_ENABLED=true`; provides real-time stock quotes, options chains, and technical indicators via yfinance. No API key required. Available to all tiers. Tools: stock_quote, options_expirations, options_chain, stock_technicals.
 - **Web Search** — conditionally loaded when `BRAVE_API_KEY` is set; web search via Brave Search API (`@modelcontextprotocol/server-brave-search`). Available to all tiers. Tools: brave_web_search.
 
@@ -159,6 +160,9 @@ Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional
 - `PLAYWRIGHT_ENABLED` — set to `true` to enable the Playwright browser automation MCP
 - `STOCKS_ENABLED` — set to `true` to enable the stock market data MCP
 - `BRAVE_API_KEY` — Brave Search API key for web search MCP (from https://brave.com/search/api/)
+- `SHOPPING_LIST_ENABLED` — set to `true` to enable the shopping list MCP
+- `SHOPPING_LIST_FILE` — path to shopping list data file (default `data/shopping_list.json`)
+- `RECIPE_FILE` — path to recipe storage file (default `data/recipes.json`)
 - `WEBHOOK_ENABLED` — set to `true` to enable the HTTP webhook server for external signal ingestion
 - `WEBHOOK_PORT` — port for the webhook server (default `8081`)
 - `WEBHOOK_SECRET` — Bearer token secret for authenticating webhook requests

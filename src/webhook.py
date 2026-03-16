@@ -70,7 +70,7 @@ def create_webhook_app(config: Config, claude_manager: ClaudeManager) -> web.App
         thread_ts = f"webhook-{time.time()}"
 
         try:
-            response = await claude_manager.send_message(
+            result = await claude_manager.send_message(
                 thread_ts, text,
                 model=model,
                 mcp_server_names=mcp_server_names,
@@ -79,6 +79,7 @@ def create_webhook_app(config: Config, claude_manager: ClaudeManager) -> web.App
                 superuser=superuser,
                 user_id=user_id,
             )
+            response = result.text
         except Exception:
             logger.exception("Webhook signal processing failed")
             return web.json_response({"ok": False, "error": "internal error"}, status=500)

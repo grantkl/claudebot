@@ -10,6 +10,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
+@dataclass
+class SendMessageResult:
+    """Result from sending a message to Claude."""
+    text: str
+    used_shopping_list_view: bool = False
+
+
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -75,7 +82,7 @@ class ClaudeManager:
     async def remove_session(self, thread_ts: str) -> None:
         await self._remove_session(thread_ts)
 
-    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None, user_name: str | None = None, _retry: bool = True) -> str:
+    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None, user_name: str | None = None, _retry: bool = True) -> SendMessageResult:
         is_new_session = thread_ts not in self._sessions
         if is_new_session:
             system_prompt = self._config.claude_system_prompt
@@ -256,16 +263,20 @@ class ClaudeManager:
                     await entry.client.query(query_text)
                 response_parts: list[str] = []
                 screenshot_paths: list[str] = []
+                used_shopping_list_view = False
                 async for msg in entry.client.receive_response():
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if isinstance(block, TextBlock):
                                 response_parts.append(block.text)
-                            elif isinstance(block, ToolUseBlock) and "screenshot" in block.name.lower():
-                                fn = block.input.get("filename")
-                                if fn:
-                                    abs_path = os.path.abspath(fn)
-                                    screenshot_paths.append(abs_path)
+                            elif isinstance(block, ToolUseBlock):
+                                if "screenshot" in block.name.lower():
+                                    fn = block.input.get("filename")
+                                    if fn:
+                                        abs_path = os.path.abspath(fn)
+                                        screenshot_paths.append(abs_path)
+                                elif "shopping_list_view" in block.name:
+                                    used_shopping_list_view = True
                     elif isinstance(msg, ResultMessage):
                         break
                 text = "".join(response_parts)
@@ -274,7 +285,7 @@ class ClaudeManager:
                     new_paths = [p for p in unique if p not in text]
                     if new_paths:
                         text += "\n" + "\n".join(new_paths)
-                return text
+                return SendMessageResult(text=text, used_shopping_list_view=used_shopping_list_view)
             except Exception:
                 await self._remove_session(thread_ts)
                 if _retry:

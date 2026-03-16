@@ -16,10 +16,19 @@ class _FakeAsyncApp:
     def __init__(self, **kwargs):
         self.token = kwargs.get("token")
         self._handlers = {}
+        self._action_handlers = {}
 
     def event(self, event_type):
         def decorator(func):
             self._handlers[event_type] = func
+            return func
+        return decorator
+
+    def action(self, action_id):
+        def decorator(func):
+            # Store by pattern string for regex patterns, or by action_id directly
+            key = action_id.pattern if hasattr(action_id, "pattern") else action_id
+            self._action_handlers[key] = func
             return func
         return decorator
 
@@ -31,6 +40,14 @@ sys.modules.setdefault("httpx", MagicMock())
 
 from src.rate_limiter import RATE_LIMIT_MESSAGE as RL_MESSAGE  # noqa: E402
 from src.slack_app import create_app  # noqa: E402
+
+def _mock_result(text, used_shopping_list_view=False):
+    """Create a mock SendMessageResult."""
+    result = MagicMock()
+    result.text = text
+    result.used_shopping_list_view = used_shopping_list_view
+    return result
+
 
 # Non-superuser tiers block filesystem tools to prevent capability discovery
 _NON_SUPERUSER_DISALLOWED = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
@@ -112,7 +129,7 @@ class TestSlackApp:
     async def test_successful_message_flow(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="Claude response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("Claude response"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -134,7 +151,7 @@ class TestSlackApp:
         # Claude called with stripped text and sonnet model for authorized user
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
@@ -154,7 +171,7 @@ class TestSlackApp:
     async def test_dm_handler_only_processes_im_channel_type(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="dm response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("dm response"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -202,7 +219,7 @@ class TestSlackApp:
     async def test_authorized_user_gets_sonnet_no_rate_limit(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
@@ -217,7 +234,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
@@ -228,7 +245,7 @@ class TestSlackApp:
     async def test_non_authorized_user_gets_haiku_with_rate_limit(self):
         config = _make_config(authorized_user_ids={"UOTHER"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter(allowed=True)
         say = AsyncMock()
@@ -279,7 +296,7 @@ class TestSlackApp:
     async def test_file_share_subtype_not_filtered(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -315,7 +332,7 @@ class TestSlackApp:
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
         claude_manager.has_session = MagicMock(return_value=False)
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         say = AsyncMock()
         client = _make_client()
         client.conversations_replies = AsyncMock(return_value={
@@ -349,7 +366,7 @@ class TestSlackApp:
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
         claude_manager.has_session = MagicMock(return_value=True)
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         say = AsyncMock()
         client = _make_client()
         client.conversations_replies = AsyncMock()
@@ -367,7 +384,7 @@ class TestSlackApp:
         client.conversations_replies.assert_not_called()
         claude_manager.send_message.assert_called_once_with(
             "parent_ts", "follow up", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
@@ -377,7 +394,7 @@ class TestSlackApp:
     async def test_file_download_and_content_inclusion(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -414,7 +431,7 @@ class TestSlackApp:
     async def test_image_file_downloaded_and_passed_to_send_message(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="I see an image")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("I see an image"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -449,7 +466,7 @@ class TestSlackApp:
     async def test_multiple_image_files_all_forwarded(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="I see images")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("I see images"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -498,7 +515,7 @@ class TestSlackApp:
     async def test_non_image_binary_file_gets_metadata_note(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -527,7 +544,7 @@ class TestSlackApp:
     async def test_mixed_text_and_image_files(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -577,7 +594,7 @@ class TestSlackApp:
     async def test_no_files_sends_no_images(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -597,7 +614,7 @@ class TestSlackApp:
         """All four supported image types (png, jpeg, gif, webp) are downloaded."""
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -645,7 +662,7 @@ class TestSlackApp:
         large_code = "\n".join([f"line {i}" for i in range(60)])
         response_text = f"Here is the code:\n```python\n{large_code}\n```"
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value=response_text)
+        claude_manager.send_message = AsyncMock(return_value=_mock_result(response_text))
         claude_manager.has_session = MagicMock(return_value=True)
         say = AsyncMock()
         client = _make_client()
@@ -670,7 +687,7 @@ class TestSlackApp:
     async def test_unauthorized_user_gets_filesystem_tools_blocked(self):
         config = _make_config(authorized_user_ids={"UOTHER"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter(allowed=True)
         say = AsyncMock()
@@ -696,7 +713,7 @@ class TestSlackApp:
     async def test_authorized_non_superuser_gets_filesystem_tools_blocked(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
@@ -711,7 +728,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
@@ -721,7 +738,7 @@ class TestSlackApp:
     async def test_unauthorized_user_evicts_authorized_session(self):
         config = _make_config(authorized_user_ids={"UOTHER"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         claude_manager.is_authorized_session = MagicMock(return_value=True)
         claude_manager.remove_session = AsyncMock()
@@ -750,7 +767,7 @@ class TestSlackApp:
     async def test_authorized_user_does_not_evict_session(self):
         config = _make_config(authorized_user_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         claude_manager.is_authorized_session = MagicMock(return_value=True)
         claude_manager.is_superuser_session = MagicMock(return_value=False)
@@ -772,7 +789,7 @@ class TestSlackApp:
     async def test_superuser_gets_opus_and_all_mcp_servers(self):
         config = _make_config(authorized_user_ids={"U001"}, superuser_ids={"U001"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
@@ -787,7 +804,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="opus", mcp_server_names={"sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch", "seats_aero", "playwright", "stocks", "web_search"}, images=None,
+            model="opus", mcp_server_names={"sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch", "seats_aero", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
             disallowed_tools=None, authorized=True, superuser=True,
             user_id="U001",
             user_name="TestUser",
@@ -798,7 +815,7 @@ class TestSlackApp:
     async def test_authorized_non_superuser_gets_sonnet_and_limited_mcp(self):
         config = _make_config(authorized_user_ids={"U001"}, superuser_ids={"UOTHER"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
@@ -813,7 +830,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
@@ -823,7 +840,7 @@ class TestSlackApp:
     async def test_non_superuser_evicts_superuser_session(self):
         config = _make_config(authorized_user_ids={"U001"}, superuser_ids={"UOTHER"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
         claude_manager.is_authorized_session = MagicMock(return_value=True)
         claude_manager.is_superuser_session = MagicMock(return_value=True)
@@ -842,8 +859,125 @@ class TestSlackApp:
         claude_manager.remove_session.assert_called_once_with(event["ts"])
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
         )
+
+
+# ---------------------------------------------------------------------------
+# TestShoppingListActionHandler
+# ---------------------------------------------------------------------------
+class TestShoppingListActionHandler:
+    """Tests for the interactive Block Kit shopping list action handler."""
+
+    _ACTION_KEY = r"shopping_list_check_item.*"
+
+    def _make_checkbox_body(self, selected_names, all_names):
+        """Build a Slack checkbox action body."""
+        return {
+            "actions": [{
+                "action_id": "shopping_list_check_item_Dairy",
+                "selected_options": [{"value": n} for n in selected_names],
+                "options": [{"value": n} for n in all_names],
+            }],
+            "channel": {"id": "C001"},
+            "message": {"ts": "1234567890.000001"},
+        }
+
+    @pytest.mark.asyncio
+    async def test_action_handler_registered(self):
+        """The app registers a handler for the shopping list check action."""
+        config = _make_config()
+        claude_manager = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        assert self._ACTION_KEY in app._action_handlers
+
+    @pytest.mark.asyncio
+    async def test_handler_checks_and_unchecks_items(self):
+        """Checks selected items and unchecks deselected items."""
+        config = _make_config()
+        claude_manager = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        handler = app._action_handlers[self._ACTION_KEY]
+        ack = AsyncMock()
+        client = _make_client()
+        client.chat_update = AsyncMock()
+        body = self._make_checkbox_body(
+            selected_names=["milk"],
+            all_names=["milk", "eggs"],
+        )
+
+        mock_store = MagicMock()
+        mock_store.get_items = MagicMock(return_value=[])
+
+        with patch("src.slack_app._get_store", return_value=mock_store):
+            await handler(ack=ack, body=body, client=client)
+
+        mock_store.check.assert_called_once_with(["milk"])
+        mock_store.uncheck.assert_called_once_with(["eggs"])
+
+    @pytest.mark.asyncio
+    async def test_handler_updates_message(self):
+        """After checking, calls client.chat_update() with channel, ts, and updated blocks."""
+        config = _make_config()
+        claude_manager = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        handler = app._action_handlers[self._ACTION_KEY]
+        ack = AsyncMock()
+        client = _make_client()
+        client.chat_update = AsyncMock()
+        body = self._make_checkbox_body(
+            selected_names=["milk"],
+            all_names=["milk"],
+        )
+
+        mock_store = MagicMock()
+        mock_store.get_items = MagicMock(return_value=[
+            {"name": "milk", "quantity": 1, "unit": "", "category": "Dairy", "checked": True},
+        ])
+
+        with patch("src.slack_app._get_store", return_value=mock_store):
+            await handler(ack=ack, body=body, client=client)
+
+        client.chat_update.assert_called_once()
+        call_kwargs = client.chat_update.call_args.kwargs
+        assert call_kwargs["channel"] == "C001"
+        assert call_kwargs["ts"] == "1234567890.000001"
+        assert "blocks" in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_handler_acknowledges(self):
+        """Handler calls ack() to acknowledge the Slack action."""
+        config = _make_config()
+        claude_manager = AsyncMock()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        handler = app._action_handlers[self._ACTION_KEY]
+        ack = AsyncMock()
+        client = _make_client()
+        client.chat_update = AsyncMock()
+        body = self._make_checkbox_body(
+            selected_names=["milk"],
+            all_names=["milk"],
+        )
+
+        mock_store = MagicMock()
+        mock_store.get_items = MagicMock(return_value=[])
+
+        with patch("src.slack_app._get_store", return_value=mock_store):
+            await handler(ack=ack, body=body, client=client)
+
+        ack.assert_called_once()

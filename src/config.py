@@ -32,6 +32,7 @@ class Config:
     webhook_enabled: bool = False
     webhook_port: int = 8081
     webhook_secret: str = ""
+    auto_reply_channel_ids: set[str] = field(default_factory=set)
 
 
 def load_config() -> Config:
@@ -98,4 +99,7 @@ def load_config() -> Config:
         webhook_enabled=os.environ.get("WEBHOOK_ENABLED", "").lower() in ("1", "true", "yes"),
         webhook_port=int(os.environ.get("WEBHOOK_PORT", "8081")),
         webhook_secret=os.environ.get("WEBHOOK_SECRET", ""),
+        auto_reply_channel_ids={
+            cid.strip() for cid in os.environ.get("AUTO_REPLY_CHANNEL_IDS", "").split(",") if cid.strip()
+        },
     )
