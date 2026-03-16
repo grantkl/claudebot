@@ -78,7 +78,7 @@ sys.modules["claude_agent_sdk"] = _mock_sdk
 # test module (e.g. test_slack_app) already imported it with a generic MagicMock.
 sys.modules.pop("src.claude_client", None)
 
-from src.claude_client import ClaudeManager, SessionEntry  # noqa: E402
+from src.claude_client import ClaudeManager, SendMessageResult, SessionEntry  # noqa: E402
 
 if _orig_sdk is not None:
     sys.modules["claude_agent_sdk"] = _orig_sdk
@@ -108,7 +108,7 @@ class TestClaudeManager:
         ])
         with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
             result = await manager.send_message("t1", "hello")
-        assert result == "hi"
+        assert result.text == "hi"
         assert "t1" in manager._sessions
 
     @pytest.mark.asyncio
@@ -125,7 +125,7 @@ class TestClaudeManager:
         ])
         with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
             result = await manager.send_message("t1", "hello")
-        assert result == "part1part2"
+        assert result.text == "part1part2"
 
     @pytest.mark.asyncio
     async def test_session_reuse_for_same_thread(self):
@@ -148,7 +148,7 @@ class TestClaudeManager:
             _FakeResultMessage(),
         ])
         result = await manager.send_message("t1", "msg2")
-        assert result == "r2"
+        assert result.text == "r2"
         # Still the same client object
         assert manager._sessions["t1"].client is entry.client
 
@@ -187,7 +187,7 @@ class TestClaudeManager:
         with patch("src.claude_client.ClaudeSDKClient", side_effect=lambda **kw: next(clients)):
             result = await manager.send_message("t1", "hello")
 
-        assert result == "recovered"
+        assert result.text == "recovered"
         assert "t1" in manager._sessions
 
     @pytest.mark.asyncio
@@ -280,7 +280,7 @@ class TestClaudeManager:
             _FakeResultMessage(),
         ])
         result = await manager.send_message("t1", "msg2", model="haiku")
-        assert result == "r2"
+        assert result.text == "r2"
         # Original client kept (no new ClaudeSDKClient created)
         assert manager._sessions["t1"].client is entry.client
 
@@ -378,7 +378,7 @@ class TestClaudeManager:
         images = [("image/png", b"\x89PNG")]
         with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
             result = await manager.send_message("t1", "describe this", images=images)
-        assert result == "got it"
+        assert result.text == "got it"
         # query() should have received an async iterable, not a string
         arg = fake_client.query.call_args[0][0]
         assert not isinstance(arg, str)
@@ -836,8 +836,8 @@ class TestClaudeManager:
             result = await manager.send_message("t1", "take a screenshot")
         import os
         expected_path = os.path.abspath("page.png")
-        assert "Here is the screenshot." in result
-        assert expected_path in result
+        assert "Here is the screenshot." in result.text
+        assert expected_path in result.text
 
     @pytest.mark.asyncio
     async def test_non_screenshot_tool_use_block_ignored(self):
@@ -856,7 +856,7 @@ class TestClaudeManager:
         ])
         with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
             result = await manager.send_message("t1", "click the button")
-        assert result == "Clicked the button."
+        assert result.text == "Clicked the button."
 
     @pytest.mark.asyncio
     async def test_screenshot_tool_use_block_without_filename_ignored(self):
@@ -875,4 +875,4 @@ class TestClaudeManager:
         ])
         with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
             result = await manager.send_message("t1", "screenshot without filename")
-        assert result == "Screenshot taken."
+        assert result.text == "Screenshot taken."

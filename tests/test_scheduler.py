@@ -27,6 +27,13 @@ sys.modules.setdefault("slack_sdk.web.async_client", _mock_slack_sdk.web.async_c
 from src.scheduler import NOTHING_TO_REPORT, TaskDefinition, TaskScheduler, TaskState  # noqa: E402
 
 
+def _mock_result(text):
+    """Create a mock SendMessageResult."""
+    r = MagicMock()
+    r.text = text
+    return r
+
+
 def _make_config(**overrides):
     cfg = MagicMock()
     cfg.scheduler_concurrency = 3
@@ -151,7 +158,7 @@ class TestTaskExecution:
     async def test_successful_execution_sends_dm(self, tmp_path):
         tasks = [_sample_task_data()]
         scheduler = _make_scheduler(tmp_path, tasks=tasks)
-        scheduler._claude_manager.send_message = AsyncMock(return_value="Summary of results")
+        scheduler._claude_manager.send_message = AsyncMock(return_value=_mock_result("Summary of results"))
 
         with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
             mock_client_instance = AsyncMock()
@@ -186,7 +193,7 @@ class TestTaskExecution:
         task_data["output"] = "silent"
         tasks = [task_data]
         scheduler = _make_scheduler(tmp_path, tasks=tasks)
-        scheduler._claude_manager.send_message = AsyncMock(return_value="Some results")
+        scheduler._claude_manager.send_message = AsyncMock(return_value=_mock_result("Some results"))
 
         with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
             mock_client_instance = AsyncMock()
@@ -200,7 +207,7 @@ class TestTaskExecution:
     async def test_session_lifecycle(self, tmp_path):
         tasks = [_sample_task_data()]
         scheduler = _make_scheduler(tmp_path, tasks=tasks)
-        scheduler._claude_manager.send_message = AsyncMock(return_value=NOTHING_TO_REPORT)
+        scheduler._claude_manager.send_message = AsyncMock(return_value=_mock_result(NOTHING_TO_REPORT))
         scheduler._claude_manager.remove_session = AsyncMock()
 
         with patch("slack_sdk.web.async_client.AsyncWebClient"):
@@ -216,7 +223,7 @@ class TestTaskExecution:
         task_data["mcp_servers"] = ["gmail", "scheduler"]
         tasks = [task_data]
         scheduler = _make_scheduler(tmp_path, tasks=tasks)
-        scheduler._claude_manager.send_message = AsyncMock(return_value=NOTHING_TO_REPORT)
+        scheduler._claude_manager.send_message = AsyncMock(return_value=_mock_result(NOTHING_TO_REPORT))
         scheduler._claude_manager.remove_session = AsyncMock()
 
         with patch("slack_sdk.web.async_client.AsyncWebClient"):
@@ -229,7 +236,7 @@ class TestTaskExecution:
     async def test_superuser_privileges(self, tmp_path):
         tasks = [_sample_task_data()]
         scheduler = _make_scheduler(tmp_path, tasks=tasks)
-        scheduler._claude_manager.send_message = AsyncMock(return_value=NOTHING_TO_REPORT)
+        scheduler._claude_manager.send_message = AsyncMock(return_value=_mock_result(NOTHING_TO_REPORT))
         scheduler._claude_manager.remove_session = AsyncMock()
 
         with patch("slack_sdk.web.async_client.AsyncWebClient"):
@@ -426,7 +433,7 @@ class TestTaskOwnership:
         scheduler = _make_scheduler(
             tmp_path, tasks=[task_data], superuser_ids={"U_SUPER"},
         )
-        scheduler._claude_manager.send_message = AsyncMock(return_value=NOTHING_TO_REPORT)
+        scheduler._claude_manager.send_message = AsyncMock(return_value=_mock_result(NOTHING_TO_REPORT))
         scheduler._claude_manager.remove_session = AsyncMock()
         with patch("slack_sdk.web.async_client.AsyncWebClient"):
             await scheduler._execute_task(scheduler._tasks["test_task"])
@@ -440,7 +447,7 @@ class TestTaskOwnership:
             tmp_path, tasks=[task_data],
             superuser_ids={"U_SUPER"}, authorized_user_ids={"U_AUTH"},
         )
-        scheduler._claude_manager.send_message = AsyncMock(return_value=NOTHING_TO_REPORT)
+        scheduler._claude_manager.send_message = AsyncMock(return_value=_mock_result(NOTHING_TO_REPORT))
         scheduler._claude_manager.remove_session = AsyncMock()
         with patch("slack_sdk.web.async_client.AsyncWebClient"):
             await scheduler._execute_task(scheduler._tasks["test_task"])
@@ -452,7 +459,7 @@ class TestTaskOwnership:
         task_data = _sample_task_data()
         task_data.pop("created_by", None)
         scheduler = _make_scheduler(tmp_path, tasks=[task_data])
-        scheduler._claude_manager.send_message = AsyncMock(return_value=NOTHING_TO_REPORT)
+        scheduler._claude_manager.send_message = AsyncMock(return_value=_mock_result(NOTHING_TO_REPORT))
         scheduler._claude_manager.remove_session = AsyncMock()
         with patch("slack_sdk.web.async_client.AsyncWebClient"):
             await scheduler._execute_task(scheduler._tasks["test_task"])

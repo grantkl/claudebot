@@ -22,6 +22,13 @@ sys.modules.setdefault("slack_sdk", _mock_slack_sdk)
 sys.modules.setdefault("slack_sdk.web", _mock_slack_sdk.web)
 sys.modules.setdefault("slack_sdk.web.async_client", _mock_slack_sdk.web.async_client)
 
+def _mock_result(text):
+    """Create a mock SendMessageResult."""
+    r = MagicMock()
+    r.text = text
+    return r
+
+
 from src.webhook import (  # noqa: E402
     AUTHORIZED_MCP_SERVERS,
     FILESYSTEM_TOOLS,
@@ -98,7 +105,7 @@ class TestAuth:
     async def test_valid_token_accepted(self):
         config = _make_config()
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="ok")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("ok"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -153,7 +160,7 @@ class TestPayloadValidation:
     async def test_notify_defaults_to_user_id(self):
         config = _make_config()
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="result")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("result"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -195,7 +202,7 @@ class TestTierLogic:
     async def test_superuser_gets_full_mcp_and_opus(self):
         config = _make_config(superuser_ids={"U_SUPER"}, authorized_user_ids={"U_SUPER"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -217,7 +224,7 @@ class TestTierLogic:
     async def test_authorized_gets_limited_mcp_and_sonnet(self):
         config = _make_config(authorized_user_ids={"U_AUTH"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -239,7 +246,7 @@ class TestTierLogic:
     async def test_unknown_user_gets_empty_mcp_and_sonnet(self):
         config = _make_config()
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="response")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -266,7 +273,7 @@ class TestDMDelivery:
     async def test_notify_sends_dm_to_each_user(self):
         config = _make_config()
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="result text")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("result text"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -291,7 +298,7 @@ class TestDMDelivery:
     async def test_empty_notify_sends_no_dms(self):
         config = _make_config()
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="result text")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("result text"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -314,7 +321,7 @@ class TestSessionCleanup:
     async def test_session_removed_after_success(self):
         config = _make_config()
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="ok")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("ok"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -356,7 +363,7 @@ class TestModelOverride:
     async def test_custom_model_passed_through(self):
         config = _make_config()
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="ok")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("ok"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -374,7 +381,7 @@ class TestModelOverride:
     async def test_superuser_default_model_is_opus(self):
         config = _make_config(superuser_ids={"U_SUPER"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="ok")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("ok"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -392,7 +399,7 @@ class TestModelOverride:
     async def test_superuser_model_override(self):
         config = _make_config(superuser_ids={"U_SUPER"})
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="ok")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("ok"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
@@ -434,7 +441,7 @@ class TestErrorHandling:
     async def test_response_includes_claude_response_text(self):
         config = _make_config()
         claude_manager = AsyncMock()
-        claude_manager.send_message = AsyncMock(return_value="Here is the answer")
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("Here is the answer"))
         claude_manager.remove_session = AsyncMock()
         request = _make_request(
             headers={"Authorization": "Bearer test-secret"},
