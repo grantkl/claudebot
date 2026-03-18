@@ -160,3 +160,24 @@ tasks:
   enabled: false
   run_once: true
   created_by: U011E9TPW84
+- id: sunday_medication_reminder
+  name: Sunday Medication Reminder
+  prompt: "Send a Slack DM reminder to user U011JKTMB4Y: \"\U0001F48A Reminder: Take\
+    \ your medication out of the fridge!\""
+  cron: 0 18 * * 0
+  mcp_servers: []
+  output: dm
+  model: sonnet
+  enabled: true
+  created_by: U011JKTMB4Y
+- id: remind_jim_p_last_day
+  name: 'Remind: Text Jim P happy last day'
+  prompt: Send a Slack DM to U011JKTMB4Y reminding them to text Jim P and wish him
+    a happy last day!
+  cron: 30 8 25 3 *
+  mcp_servers: []
+  output: dm
+  model: sonnet
+  enabled: true
+  run_once: true
+  created_by: U011JKTMB4Y

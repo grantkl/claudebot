@@ -13,7 +13,7 @@ RUN apt-get update && \
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
-RUN npm install -g @privilegemendes/amadeus-mcp-server
+# RUN npm install -g @privilegemendes/amadeus-mcp-server  # Disabled: no production API key
 RUN npm install -g @modelcontextprotocol/server-brave-search
 
 # Install Playwright MCP and browser dependencies for headless Chromium
@@ -28,6 +28,11 @@ WORKDIR /app
 # Install Python dependencies
 COPY pyproject.toml .
 RUN uv pip install --system --no-cache .
+
+# Install Google Flights MCP server (HaroldLeo — fast-flights scraper with SerpAPI fallback)
+RUN apt-get update && apt-get install -y --no-install-recommends git && \
+    uv pip install --system --no-cache "mcp-server-google-flights @ git+https://github.com/HaroldLeo/google-flights-mcp.git" && \
+    apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 # Copy application source
 COPY src/ src/

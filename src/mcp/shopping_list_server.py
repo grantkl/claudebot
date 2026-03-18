@@ -12,29 +12,38 @@ from claude_agent_sdk import SdkMcpTool, tool
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_LIST = "grocery"
+
 _store: ShoppingListStore | None = None
 
 
 class ShoppingListStore:
-    """JSON-backed storage for a shopping list."""
+    """JSON-backed storage for multiple named shopping lists."""
 
     def __init__(self, file_path: str) -> None:
         self._path = file_path
-        self._data: dict[str, Any] = {"items": []}
+        self._data: dict[str, Any] = {"lists": {}}
         self._load()
 
     def _load(self) -> None:
         if os.path.exists(self._path):
             with open(self._path) as f:
-                self._data = json.load(f)
+                raw = json.load(f)
+            # Migrate legacy single-list format: {"items": [...]} -> {"lists": {"grocery": {"items": [...]}}}
+            if "items" in raw and "lists" not in raw:
+                self._data = {"lists": {DEFAULT_LIST: {"items": raw["items"]}}}
+                self._save()
+            else:
+                self._data = raw
             # Normalize categories on load
             dirty = False
-            for item in self._data.get("items", []):
-                cat = item.get("category", "")
-                normalized = cat.strip().title() if cat else ""
-                if normalized != cat:
-                    item["category"] = normalized
-                    dirty = True
+            for list_data in self._data.get("lists", {}).values():
+                for item in list_data.get("items", []):
+                    cat = item.get("category", "")
+                    normalized = cat.strip().title() if cat else ""
+                    if normalized != cat:
+                        item["category"] = normalized
+                        dirty = True
             if dirty:
                 self._save()
 
@@ -43,6 +52,20 @@ class ShoppingListStore:
         with open(self._path, "w") as f:
             json.dump(self._data, f, indent=2)
 
+    def _get_list_items(self, list_name: str) -> list[dict[str, Any]]:
+        """Get items for a specific list, creating it if needed."""
+        list_name = list_name.lower()
+        if list_name not in self._data["lists"]:
+            self._data["lists"][list_name] = {"items": []}
+        return self._data["lists"][list_name]["items"]
+
+    def _set_list_items(self, list_name: str, items: list[dict[str, Any]]) -> None:
+        """Set items for a specific list."""
+        list_name = list_name.lower()
+        if list_name not in self._data["lists"]:
+            self._data["lists"][list_name] = {"items": []}
+        self._data["lists"][list_name]["items"] = items
+
     def add(
         self,
         name: str,
@@ -50,11 +73,13 @@ class ShoppingListStore:
         unit: str = "",
         category: str = "",
         added_by: str = "",
+        list_name: str = DEFAULT_LIST,
     ) -> dict[str, Any]:
         # Normalize category to title case
         category = category.strip().title() if category else ""
+        items = self._get_list_items(list_name)
         # Dedup by name (case-insensitive) AND unit match
-        for item in self._data["items"]:
+        for item in items:
             if item["name"].lower() == name.lower() and item["unit"] == unit:
                 item["quantity"] += quantity
                 # Update category if previously empty
@@ -71,59 +96,84 @@ class ShoppingListStore:
             "added_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "added_by": added_by,
         }
-        self._data["items"].append(item)
+        items.append(item)
         self._save()
         return item
 
-    def remove(self, names: list[str]) -> list[str]:
+    def remove(self, names: list[str], list_name: str = DEFAULT_LIST) -> list[str]:
         lower_names = {n.lower() for n in names}
+        items = self._get_list_items(list_name)
         removed = []
         remaining = []
-        for item in self._data["items"]:
+        for item in items:
             if item["name"].lower() in lower_names:
                 removed.append(item["name"])
             else:
                 remaining.append(item)
-        self._data["items"] = remaining
+        self._set_list_items(list_name, remaining)
         self._save()
         return removed
 
-    def check(self, names: list[str]) -> list[str]:
+    def check(self, names: list[str], list_name: str = DEFAULT_LIST) -> list[str]:
         lower_names = {n.lower() for n in names}
+        items = self._get_list_items(list_name)
         checked = []
-        for item in self._data["items"]:
+        for item in items:
             if item["name"].lower() in lower_names:
                 item["checked"] = True
                 checked.append(item["name"])
         self._save()
         return checked
 
-    def uncheck(self, names: list[str]) -> list[str]:
+    def uncheck(self, names: list[str], list_name: str = DEFAULT_LIST) -> list[str]:
         lower_names = {n.lower() for n in names}
+        items = self._get_list_items(list_name)
         unchecked = []
-        for item in self._data["items"]:
+        for item in items:
             if item["name"].lower() in lower_names:
                 item["checked"] = False
                 unchecked.append(item["name"])
         self._save()
         return unchecked
 
-    def clear(self, checked_only: bool = True) -> int:
+    def clear(self, checked_only: bool = True, list_name: str = DEFAULT_LIST) -> int:
+        items = self._get_list_items(list_name)
         if checked_only:
-            before = len(self._data["items"])
-            self._data["items"] = [i for i in self._data["items"] if not i["checked"]]
-            removed = before - len(self._data["items"])
+            before = len(items)
+            remaining = [i for i in items if not i["checked"]]
+            removed = before - len(remaining)
+            self._set_list_items(list_name, remaining)
         else:
-            removed = len(self._data["items"])
-            self._data["items"] = []
+            removed = len(items)
+            self._set_list_items(list_name, [])
         self._save()
         return removed
 
-    def get_items(self, category: str | None = None) -> list[dict[str, Any]]:
-        items = self._data["items"]
+    def get_items(self, category: str | None = None, list_name: str = DEFAULT_LIST) -> list[dict[str, Any]]:
+        items = self._get_list_items(list_name)
         if category is not None:
             items = [i for i in items if i["category"].lower() == category.lower()]
         return items
+
+    def get_list_names(self) -> list[str]:
+        """Return all list names that have at least one item."""
+        return [
+            name for name, data in self._data.get("lists", {}).items()
+            if data.get("items")
+        ]
+
+    def get_all_list_names(self) -> list[str]:
+        """Return all list names, including empty ones."""
+        return list(self._data.get("lists", {}).keys())
+
+    def delete_list(self, list_name: str) -> bool:
+        """Delete an entire list. Returns True if it existed."""
+        list_name = list_name.lower()
+        if list_name in self._data["lists"]:
+            del self._data["lists"][list_name]
+            self._save()
+            return True
+        return False
 
 
 def _get_store() -> ShoppingListStore:
@@ -142,9 +192,15 @@ def _error(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "is_error": True}
 
 
+_LIST_NAME_PARAM = {
+    "type": "string",
+    "description": "Name of the shopping list (e.g. 'grocery', 'costco', 'hardware'). Defaults to 'grocery' if not specified.",
+}
+
+
 @tool(
     "shopping_list_add",
-    "Add one or more items to the shopping list. Deduplicates by name and unit, summing quantities. Always split quantity from unit (e.g. '450g' -> quantity=450 unit='g', '2 cups' -> quantity=2 unit='cup'). Use consistent category names: Produce, Meat, Dairy, Bakery, Frozen, Pantry, Condiments, Spices, Snacks, Beverages, Refrigerated, Other.",
+    "Add one or more items to a shopping list. Deduplicates by name and unit, summing quantities. Always split quantity from unit (e.g. '450g' -> quantity=450 unit='g', '2 cups' -> quantity=2 unit='cup'). Use consistent category names: Produce, Meat, Dairy, Bakery, Frozen, Pantry, Condiments, Spices, Snacks, Beverages, Refrigerated, Other.",
     {
         "type": "object",
         "properties": {
@@ -163,6 +219,7 @@ def _error(text: str) -> dict[str, Any]:
                 "description": "Items to add",
             },
             "added_by": {"type": "string", "description": "Slack user ID of who added the items"},
+            "list_name": _LIST_NAME_PARAM,
         },
         "required": ["items"],
     },
@@ -171,6 +228,7 @@ async def shopping_list_add(args: dict[str, Any]) -> dict[str, Any]:
     try:
         store = _get_store()
         added_by = args.get("added_by", "")
+        list_name = args.get("list_name", DEFAULT_LIST)
         added = []
         for item_data in args["items"]:
             item = store.add(
@@ -179,35 +237,38 @@ async def shopping_list_add(args: dict[str, Any]) -> dict[str, Any]:
                 unit=item_data.get("unit", ""),
                 category=item_data.get("category", ""),
                 added_by=added_by,
+                list_name=list_name,
             )
             added.append(item["name"])
-        return _text(f"Added/updated {len(added)} item(s): {', '.join(added)}")
+        return _text(f"Added/updated {len(added)} item(s) on '{list_name}' list: {', '.join(added)}")
     except Exception as e:
         return _error(f"Failed to add items: {e}")
 
 
 @tool(
     "shopping_list_view",
-    "View the current shopping list, optionally filtered by category.",
+    "View a shopping list, optionally filtered by category. Defaults to the 'grocery' list.",
     {
         "type": "object",
         "properties": {
             "category": {"type": "string", "description": "Filter by category (case-insensitive)"},
+            "list_name": _LIST_NAME_PARAM,
         },
     },
 )
 async def shopping_list_view(args: dict[str, Any]) -> dict[str, Any]:
     try:
         store = _get_store()
-        items = store.get_items(category=args.get("category"))
-        return _text(json.dumps({"items": items}, indent=2))
+        list_name = args.get("list_name", DEFAULT_LIST)
+        items = store.get_items(category=args.get("category"), list_name=list_name)
+        return _text(json.dumps({"list_name": list_name, "items": items}, indent=2))
     except Exception as e:
         return _error(f"Failed to view shopping list: {e}")
 
 
 @tool(
     "shopping_list_remove",
-    "Remove items from the shopping list by name.",
+    "Remove items from a shopping list by name.",
     {
         "type": "object",
         "properties": {
@@ -216,6 +277,7 @@ async def shopping_list_view(args: dict[str, Any]) -> dict[str, Any]:
                 "items": {"type": "string"},
                 "description": "Item names to remove",
             },
+            "list_name": _LIST_NAME_PARAM,
         },
         "required": ["names"],
     },
@@ -223,15 +285,16 @@ async def shopping_list_view(args: dict[str, Any]) -> dict[str, Any]:
 async def shopping_list_remove(args: dict[str, Any]) -> dict[str, Any]:
     try:
         store = _get_store()
-        removed = store.remove(args["names"])
-        return _text(f"Removed {len(removed)} item(s): {', '.join(removed) if removed else 'none found'}")
+        list_name = args.get("list_name", DEFAULT_LIST)
+        removed = store.remove(args["names"], list_name=list_name)
+        return _text(f"Removed {len(removed)} item(s) from '{list_name}' list: {', '.join(removed) if removed else 'none found'}")
     except Exception as e:
         return _error(f"Failed to remove items: {e}")
 
 
 @tool(
     "shopping_list_check",
-    "Mark items as checked/purchased on the shopping list.",
+    "Mark items as checked/purchased on a shopping list.",
     {
         "type": "object",
         "properties": {
@@ -240,6 +303,7 @@ async def shopping_list_remove(args: dict[str, Any]) -> dict[str, Any]:
                 "items": {"type": "string"},
                 "description": "Item names to check off",
             },
+            "list_name": _LIST_NAME_PARAM,
         },
         "required": ["names"],
     },
@@ -247,15 +311,16 @@ async def shopping_list_remove(args: dict[str, Any]) -> dict[str, Any]:
 async def shopping_list_check(args: dict[str, Any]) -> dict[str, Any]:
     try:
         store = _get_store()
-        checked = store.check(args["names"])
-        return _text(f"Checked {len(checked)} item(s): {', '.join(checked) if checked else 'none found'}")
+        list_name = args.get("list_name", DEFAULT_LIST)
+        checked = store.check(args["names"], list_name=list_name)
+        return _text(f"Checked {len(checked)} item(s) on '{list_name}' list: {', '.join(checked) if checked else 'none found'}")
     except Exception as e:
         return _error(f"Failed to check items: {e}")
 
 
 @tool(
     "shopping_list_uncheck",
-    "Uncheck items on the shopping list.",
+    "Uncheck items on a shopping list.",
     {
         "type": "object",
         "properties": {
@@ -264,6 +329,7 @@ async def shopping_list_check(args: dict[str, Any]) -> dict[str, Any]:
                 "items": {"type": "string"},
                 "description": "Item names to uncheck",
             },
+            "list_name": _LIST_NAME_PARAM,
         },
         "required": ["names"],
     },
@@ -271,35 +337,93 @@ async def shopping_list_check(args: dict[str, Any]) -> dict[str, Any]:
 async def shopping_list_uncheck(args: dict[str, Any]) -> dict[str, Any]:
     try:
         store = _get_store()
-        unchecked = store.uncheck(args["names"])
-        return _text(f"Unchecked {len(unchecked)} item(s): {', '.join(unchecked) if unchecked else 'none found'}")
+        list_name = args.get("list_name", DEFAULT_LIST)
+        unchecked = store.uncheck(args["names"], list_name=list_name)
+        return _text(f"Unchecked {len(unchecked)} item(s) on '{list_name}' list: {', '.join(unchecked) if unchecked else 'none found'}")
     except Exception as e:
         return _error(f"Failed to uncheck items: {e}")
 
 
 @tool(
     "shopping_list_clear",
-    "Clear items from the shopping list. By default clears only checked items.",
+    "Clear items from a shopping list. By default clears only checked items.",
     {
         "type": "object",
         "properties": {
             "all": {"type": "boolean", "description": "If true, clear all items. Otherwise only checked items."},
             "checked_only": {"type": "boolean", "description": "If true (default), only clear checked items."},
+            "list_name": _LIST_NAME_PARAM,
         },
     },
 )
 async def shopping_list_clear(args: dict[str, Any]) -> dict[str, Any]:
     try:
         store = _get_store()
+        list_name = args.get("list_name", DEFAULT_LIST)
         # "all" flag overrides checked_only
         if args.get("all", False):
             checked_only = False
         else:
             checked_only = args.get("checked_only", True)
-        removed = store.clear(checked_only=checked_only)
-        return _text(f"Cleared {removed} item(s) from the shopping list.")
+        removed = store.clear(checked_only=checked_only, list_name=list_name)
+        return _text(f"Cleared {removed} item(s) from the '{list_name}' list.")
     except Exception as e:
         return _error(f"Failed to clear shopping list: {e}")
+
+
+@tool(
+    "shopping_list_lists",
+    "List all available shopping lists and their item counts.",
+    {
+        "type": "object",
+        "properties": {
+            "include_empty": {"type": "boolean", "description": "If true, include lists with no items. Default false."},
+        },
+    },
+)
+async def shopping_list_lists(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        store = _get_store()
+        include_empty = args.get("include_empty", False)
+        if include_empty:
+            names = store.get_all_list_names()
+        else:
+            names = store.get_list_names()
+        if not names:
+            return _text("No shopping lists found.")
+        summaries = []
+        for name in sorted(names):
+            items = store.get_items(list_name=name)
+            checked = sum(1 for i in items if i.get("checked"))
+            summaries.append(f"- {name}: {len(items)} item(s) ({checked} checked)")
+        return _text("Shopping lists:\n" + "\n".join(summaries))
+    except Exception as e:
+        return _error(f"Failed to list shopping lists: {e}")
+
+
+@tool(
+    "shopping_list_delete_list",
+    "Delete an entire shopping list by name. This removes the list and all its items permanently.",
+    {
+        "type": "object",
+        "properties": {
+            "list_name": {
+                "type": "string",
+                "description": "Name of the list to delete",
+            },
+        },
+        "required": ["list_name"],
+    },
+)
+async def shopping_list_delete_list(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        store = _get_store()
+        list_name = args["list_name"]
+        if store.delete_list(list_name):
+            return _text(f"Deleted the '{list_name}' shopping list.")
+        return _text(f"Shopping list '{list_name}' not found.")
+    except Exception as e:
+        return _error(f"Failed to delete shopping list: {e}")
 
 
 def _item_label(item: dict[str, Any]) -> str:
@@ -314,13 +438,13 @@ def _item_label(item: dict[str, Any]) -> str:
     return name
 
 
-def build_shopping_list_blocks(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def build_shopping_list_blocks(items: list[dict[str, Any]], list_name: str = DEFAULT_LIST) -> list[dict[str, Any]]:
     """Build Slack Block Kit blocks grouped by category with checkboxes."""
     if not items:
         return [
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "Your shopping list is empty."},
+                "text": {"type": "mrkdwn", "text": f"Your {list_name} shopping list is empty."},
             }
         ]
 
@@ -356,7 +480,7 @@ def build_shopping_list_blocks(items: list[dict[str, Any]]) -> list[dict[str, An
             "elements": [
                 {
                     "type": "checkboxes",
-                    "action_id": f"shopping_list_check_item_{category}",
+                    "action_id": f"shopping_list_check_item_{list_name}_{category}",
                     "options": options,
                 }
             ],
@@ -577,6 +701,8 @@ SHOPPING_LIST_TOOLS: list[SdkMcpTool] = [
     shopping_list_check,
     shopping_list_uncheck,
     shopping_list_clear,
+    shopping_list_lists,
+    shopping_list_delete_list,
     recipe_save,
     recipe_list,
     recipe_view,
