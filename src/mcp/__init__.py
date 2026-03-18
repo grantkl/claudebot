@@ -71,22 +71,28 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
 
     flights_enabled = os.environ.get("FLIGHTS_ENABLED", "").lower() in ("1", "true", "yes")
     if flights_enabled:
-        amadeus_path = _resolve_amadeus_path()
-        if amadeus_path:
-            servers["flights"] = {
-                "type": "stdio",
-                "command": "node",
-                "args": [amadeus_path],
-                "env": {
-                    "AMADEUS_CLIENT_ID": os.environ.get("AMADEUS_CLIENT_ID", ""),
-                    "AMADEUS_CLIENT_SECRET": os.environ.get("AMADEUS_CLIENT_SECRET", ""),
-                },
-            }
+        # Amadeus disabled — no production API key available
+        # amadeus_path = _resolve_amadeus_path()
+        # if amadeus_path:
+        #     servers["flights"] = { ... }
 
         from .flight_watch_server import FLIGHT_WATCH_TOOLS
         servers["flight_watch"] = create_sdk_mcp_server(
             name="flight_watch", version="1.0.0", tools=FLIGHT_WATCH_TOOLS
         )
+
+    google_flights_enabled = os.environ.get("GOOGLE_FLIGHTS_ENABLED", "").lower() in ("1", "true", "yes")
+    if google_flights_enabled:
+        gf_env: dict[str, str] = {}
+        serpapi_key = os.environ.get("SERPAPI_API_KEY", "")
+        if serpapi_key:
+            gf_env["SERPAPI_API_KEY"] = serpapi_key
+        servers["google_flights"] = {
+            "type": "stdio",
+            "command": "mcp-server-google-flights",
+            "args": [],
+            "env": gf_env,
+        }
 
     seats_aero_key = os.environ.get("SEATS_AERO_API_KEY", "")
     if seats_aero_key:

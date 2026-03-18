@@ -21,14 +21,10 @@ from src.mcp import _resolve_amadeus_path, _resolve_playwright_path, build_mcp_s
 class TestBuildMcpServersFlights:
     @patch("src.mcp._resolve_amadeus_path", return_value="/usr/lib/node_modules/@privilegemendes/amadeus-mcp-server/dist/index.js")
     @patch.dict("os.environ", {"FLIGHTS_ENABLED": "true", "AMADEUS_CLIENT_ID": "test-id", "AMADEUS_CLIENT_SECRET": "test-secret"}, clear=False)
-    def test_flights_enabled_with_amadeus_installed(self, mock_resolve):
+    def test_amadeus_disabled_even_when_flights_enabled(self, mock_resolve):
+        """Amadeus is currently disabled (no production key)."""
         servers = build_mcp_servers()
-        assert "flights" in servers
-        assert servers["flights"]["type"] == "stdio"
-        assert servers["flights"]["command"] == "node"
-        assert servers["flights"]["args"] == ["/usr/lib/node_modules/@privilegemendes/amadeus-mcp-server/dist/index.js"]
-        assert servers["flights"]["env"]["AMADEUS_CLIENT_ID"] == "test-id"
-        assert servers["flights"]["env"]["AMADEUS_CLIENT_SECRET"] == "test-secret"
+        assert "flights" not in servers
 
     @patch("src.mcp._resolve_amadeus_path", return_value="/some/path/index.js")
     @patch.dict("os.environ", {"FLIGHTS_ENABLED": "false"}, clear=False)
@@ -36,19 +32,31 @@ class TestBuildMcpServersFlights:
         servers = build_mcp_servers()
         assert "flights" not in servers
 
-    @patch("src.mcp._resolve_amadeus_path", return_value=None)
-    @patch.dict("os.environ", {"FLIGHTS_ENABLED": "true"}, clear=False)
-    def test_flights_enabled_but_amadeus_not_installed(self, mock_resolve):
-        servers = build_mcp_servers()
-        assert "flights" not in servers
-
     @patch.dict("os.environ", {}, clear=False)
     def test_flights_not_set_in_env(self):
-        # Remove FLIGHTS_ENABLED if present
         import os
         os.environ.pop("FLIGHTS_ENABLED", None)
         servers = build_mcp_servers()
         assert "flights" not in servers
+
+
+class TestBuildMcpServersGoogleFlights:
+    @patch.dict("os.environ", {"GOOGLE_FLIGHTS_ENABLED": "true"}, clear=False)
+    def test_google_flights_enabled(self):
+        servers = build_mcp_servers()
+        assert "google_flights" in servers
+        assert servers["google_flights"]["type"] == "stdio"
+        assert servers["google_flights"]["command"] == "google-flights-mcp"
+
+    @patch.dict("os.environ", {"GOOGLE_FLIGHTS_ENABLED": "true", "SERPAPI_API_KEY": "test-key"}, clear=False)
+    def test_google_flights_with_serpapi_key(self):
+        servers = build_mcp_servers()
+        assert servers["google_flights"]["env"]["SERPAPI_API_KEY"] == "test-key"
+
+    @patch.dict("os.environ", {"GOOGLE_FLIGHTS_ENABLED": "false"}, clear=False)
+    def test_google_flights_disabled(self):
+        servers = build_mcp_servers()
+        assert "google_flights" not in servers
 
 
 class TestBuildMcpServersFlightWatch:

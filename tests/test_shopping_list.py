@@ -46,6 +46,8 @@ _remove = shopping_list_server.shopping_list_remove.handler
 _check = shopping_list_server.shopping_list_check.handler
 _uncheck = shopping_list_server.shopping_list_uncheck.handler
 _clear = shopping_list_server.shopping_list_clear.handler
+_lists = shopping_list_server.shopping_list_lists.handler
+_delete_list = shopping_list_server.shopping_list_delete_list.handler
 
 
 def _parse_text(result: dict[str, Any]) -> str:
@@ -226,6 +228,150 @@ class TestShoppingListStore:
 
 
 # ---------------------------------------------------------------------------
+# TestMultipleListsStore
+# ---------------------------------------------------------------------------
+class TestMultipleListsStore:
+    """Tests for multi-list functionality at the store level."""
+
+    def test_add_to_different_lists(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="grocery")
+        store.add("Drill bits", list_name="hardware")
+        assert len(store.get_items(list_name="grocery")) == 1
+        assert len(store.get_items(list_name="hardware")) == 1
+        assert store.get_items(list_name="grocery")[0]["name"] == "Milk"
+        assert store.get_items(list_name="hardware")[0]["name"] == "Drill bits"
+
+    def test_default_list_is_grocery(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk")
+        assert len(store.get_items()) == 1
+        assert len(store.get_items(list_name="grocery")) == 1
+
+    def test_list_names_case_insensitive(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="Grocery")
+        store.add("Eggs", list_name="grocery")
+        # Both should end up on the same list (normalized to lowercase)
+        assert len(store.get_items(list_name="grocery")) == 2
+
+    def test_dedup_within_list_not_across(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", quantity=1, list_name="grocery")
+        store.add("Milk", quantity=2, list_name="costco")
+        assert store.get_items(list_name="grocery")[0]["quantity"] == 1
+        assert store.get_items(list_name="costco")[0]["quantity"] == 2
+
+    def test_remove_from_specific_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="grocery")
+        store.add("Milk", list_name="costco")
+        store.remove(["Milk"], list_name="grocery")
+        assert len(store.get_items(list_name="grocery")) == 0
+        assert len(store.get_items(list_name="costco")) == 1
+
+    def test_check_on_specific_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="grocery")
+        store.add("Milk", list_name="costco")
+        store.check(["Milk"], list_name="grocery")
+        grocery_milk = store.get_items(list_name="grocery")[0]
+        costco_milk = store.get_items(list_name="costco")[0]
+        assert grocery_milk["checked"] is True
+        assert costco_milk["checked"] is False
+
+    def test_uncheck_on_specific_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="grocery")
+        store.check(["Milk"], list_name="grocery")
+        store.uncheck(["Milk"], list_name="grocery")
+        assert store.get_items(list_name="grocery")[0]["checked"] is False
+
+    def test_clear_specific_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="grocery")
+        store.add("Drill", list_name="hardware")
+        store.check(["Milk"], list_name="grocery")
+        store.clear(checked_only=True, list_name="grocery")
+        assert len(store.get_items(list_name="grocery")) == 0
+        assert len(store.get_items(list_name="hardware")) == 1
+
+    def test_get_list_names(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="grocery")
+        store.add("Drill", list_name="hardware")
+        names = store.get_list_names()
+        assert set(names) == {"grocery", "hardware"}
+
+    def test_get_list_names_excludes_empty(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="grocery")
+        store.add("Drill", list_name="hardware")
+        store.clear(checked_only=False, list_name="hardware")
+        names = store.get_list_names()
+        assert names == ["grocery"]
+
+    def test_get_all_list_names_includes_empty(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="grocery")
+        store.add("Drill", list_name="hardware")
+        store.clear(checked_only=False, list_name="hardware")
+        names = store.get_all_list_names()
+        assert set(names) == {"grocery", "hardware"}
+
+    def test_delete_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="grocery")
+        store.add("Drill", list_name="hardware")
+        assert store.delete_list("hardware") is True
+        assert "hardware" not in store.get_all_list_names()
+        assert store.delete_list("nonexistent") is False
+
+    def test_migrate_legacy_format(self, tmp_path):
+        """Loading a legacy single-list file migrates to multi-list format."""
+        f = str(tmp_path / "shopping.json")
+        legacy_data = {
+            "items": [
+                {"name": "Milk", "quantity": 1, "unit": "", "category": "Dairy",
+                 "checked": False, "added_at": "2026-01-01T00:00:00+00:00", "added_by": ""},
+            ]
+        }
+        with open(f, "w") as fh:
+            json.dump(legacy_data, fh)
+        store = shopping_list_server.ShoppingListStore(f)
+        # Should have migrated to "grocery" list
+        items = store.get_items(list_name="grocery")
+        assert len(items) == 1
+        assert items[0]["name"] == "Milk"
+        # Verify on-disk format was updated
+        with open(f) as fh:
+            data = json.load(fh)
+        assert "lists" in data
+        assert "items" not in data
+
+    def test_save_and_reload_multi_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        store = shopping_list_server.ShoppingListStore(f)
+        store.add("Milk", list_name="grocery")
+        store.add("Drill", list_name="hardware")
+        store2 = shopping_list_server.ShoppingListStore(f)
+        assert len(store2.get_items(list_name="grocery")) == 1
+        assert len(store2.get_items(list_name="hardware")) == 1
+
+
+# ---------------------------------------------------------------------------
 # TestShoppingListAdd (MCP tool)
 # ---------------------------------------------------------------------------
 class TestShoppingListAdd:
@@ -251,7 +397,7 @@ class TestShoppingListAdd:
         assert not _is_error(result)
         with open(f) as fh:
             data = json.load(fh)
-        assert len(data["items"]) == 2
+        assert len(data["lists"]["grocery"]["items"]) == 2
 
     @pytest.mark.asyncio
     async def test_add_dedup_merge_same_unit(self, tmp_path):
@@ -262,8 +408,8 @@ class TestShoppingListAdd:
         assert not _is_error(result)
         with open(f) as fh:
             data = json.load(fh)
-        assert len(data["items"]) == 1
-        assert data["items"][0]["quantity"] == 5
+        assert len(data["lists"]["grocery"]["items"]) == 1
+        assert data["lists"]["grocery"]["items"][0]["quantity"] == 5
 
     @pytest.mark.asyncio
     async def test_add_no_merge_different_units(self, tmp_path):
@@ -273,7 +419,30 @@ class TestShoppingListAdd:
             await _add({"items": [{"name": "Milk", "quantity": 2, "unit": "tbsp"}]})
         with open(f) as fh:
             data = json.load(fh)
-        assert len(data["items"]) == 2
+        assert len(data["lists"]["grocery"]["items"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_add_to_named_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            result = await _add({"items": [{"name": "Drill bits"}], "list_name": "hardware"})
+        assert not _is_error(result)
+        text = _parse_text(result)
+        assert "hardware" in text
+        assert "Drill bits" in text
+        with open(f) as fh:
+            data = json.load(fh)
+        assert len(data["lists"]["hardware"]["items"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_add_default_list_is_grocery(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            await _add({"items": [{"name": "Eggs"}]})
+        with open(f) as fh:
+            data = json.load(fh)
+        assert "grocery" in data["lists"]
+        assert len(data["lists"]["grocery"]["items"]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +483,26 @@ class TestShoppingListView:
         assert len(data["items"]) == 1
         assert data["items"][0]["name"] == "Eggs"
 
+    @pytest.mark.asyncio
+    async def test_view_specific_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            await _add({"items": [{"name": "Eggs"}], "list_name": "grocery"})
+            await _add({"items": [{"name": "Drill"}], "list_name": "hardware"})
+            result = await _view({"list_name": "hardware"})
+        data = json.loads(_parse_text(result))
+        assert data["list_name"] == "hardware"
+        assert len(data["items"]) == 1
+        assert data["items"][0]["name"] == "Drill"
+
+    @pytest.mark.asyncio
+    async def test_view_includes_list_name(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            result = await _view({})
+        data = json.loads(_parse_text(result))
+        assert "list_name" in data
+
 
 # ---------------------------------------------------------------------------
 # TestShoppingListRemove (MCP tool)
@@ -328,8 +517,8 @@ class TestShoppingListRemove:
         assert not _is_error(result)
         with open(f) as fh:
             data = json.load(fh)
-        assert len(data["items"]) == 1
-        assert data["items"][0]["name"] == "Milk"
+        assert len(data["lists"]["grocery"]["items"]) == 1
+        assert data["lists"]["grocery"]["items"][0]["name"] == "Milk"
 
     @pytest.mark.asyncio
     async def test_remove_nonexistent_no_error(self, tmp_path):
@@ -338,6 +527,19 @@ class TestShoppingListRemove:
             await _add({"items": [{"name": "Eggs"}]})
             result = await _remove({"names": ["Bananas"]})
         assert not _is_error(result)
+
+    @pytest.mark.asyncio
+    async def test_remove_from_specific_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            await _add({"items": [{"name": "Milk"}], "list_name": "grocery"})
+            await _add({"items": [{"name": "Milk"}], "list_name": "costco"})
+            result = await _remove({"names": ["Milk"], "list_name": "costco"})
+        assert not _is_error(result)
+        with open(f) as fh:
+            data = json.load(fh)
+        assert len(data["lists"]["grocery"]["items"]) == 1
+        assert len(data["lists"]["costco"]["items"]) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +555,19 @@ class TestShoppingListCheck:
         assert not _is_error(result)
         with open(f) as fh:
             data = json.load(fh)
-        assert data["items"][0]["checked"] is True
+        assert data["lists"]["grocery"]["items"][0]["checked"] is True
+
+    @pytest.mark.asyncio
+    async def test_check_on_specific_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            await _add({"items": [{"name": "Drill"}], "list_name": "hardware"})
+            result = await _check({"names": ["Drill"], "list_name": "hardware"})
+        assert not _is_error(result)
+        assert "hardware" in _parse_text(result)
+        with open(f) as fh:
+            data = json.load(fh)
+        assert data["lists"]["hardware"]["items"][0]["checked"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -370,7 +584,19 @@ class TestShoppingListUncheck:
         assert not _is_error(result)
         with open(f) as fh:
             data = json.load(fh)
-        assert data["items"][0]["checked"] is False
+        assert data["lists"]["grocery"]["items"][0]["checked"] is False
+
+    @pytest.mark.asyncio
+    async def test_uncheck_on_specific_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            await _add({"items": [{"name": "Drill"}], "list_name": "hardware"})
+            await _check({"names": ["Drill"], "list_name": "hardware"})
+            result = await _uncheck({"names": ["Drill"], "list_name": "hardware"})
+        assert not _is_error(result)
+        with open(f) as fh:
+            data = json.load(fh)
+        assert data["lists"]["hardware"]["items"][0]["checked"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -387,8 +613,8 @@ class TestShoppingListClear:
         assert not _is_error(result)
         with open(f) as fh:
             data = json.load(fh)
-        assert len(data["items"]) == 1
-        assert data["items"][0]["name"] == "Milk"
+        assert len(data["lists"]["grocery"]["items"]) == 1
+        assert data["lists"]["grocery"]["items"][0]["name"] == "Milk"
 
     @pytest.mark.asyncio
     async def test_clear_all(self, tmp_path):
@@ -400,7 +626,100 @@ class TestShoppingListClear:
         assert not _is_error(result)
         with open(f) as fh:
             data = json.load(fh)
-        assert len(data["items"]) == 0
+        assert len(data["lists"]["grocery"]["items"]) == 0
+
+    @pytest.mark.asyncio
+    async def test_clear_specific_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            await _add({"items": [{"name": "Eggs"}], "list_name": "grocery"})
+            await _add({"items": [{"name": "Drill"}], "list_name": "hardware"})
+            result = await _clear({"all": True, "list_name": "hardware"})
+        assert not _is_error(result)
+        assert "hardware" in _parse_text(result)
+        with open(f) as fh:
+            data = json.load(fh)
+        assert len(data["lists"]["grocery"]["items"]) == 1
+        assert len(data["lists"]["hardware"]["items"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# TestShoppingListLists (MCP tool)
+# ---------------------------------------------------------------------------
+class TestShoppingListLists:
+    @pytest.mark.asyncio
+    async def test_lists_empty(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            result = await _lists({})
+        assert not _is_error(result)
+        text = _parse_text(result)
+        assert "no" in text.lower() or "No" in text
+
+    @pytest.mark.asyncio
+    async def test_lists_with_items(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            await _add({"items": [{"name": "Eggs"}, {"name": "Milk"}], "list_name": "grocery"})
+            await _add({"items": [{"name": "Drill"}], "list_name": "hardware"})
+            result = await _lists({})
+        assert not _is_error(result)
+        text = _parse_text(result)
+        assert "grocery" in text
+        assert "hardware" in text
+        assert "2 item(s)" in text
+        assert "1 item(s)" in text
+
+    @pytest.mark.asyncio
+    async def test_lists_excludes_empty_by_default(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            await _add({"items": [{"name": "Eggs"}], "list_name": "grocery"})
+            await _add({"items": [{"name": "Drill"}], "list_name": "hardware"})
+            await _clear({"all": True, "list_name": "hardware"})
+            result = await _lists({})
+        text = _parse_text(result)
+        assert "grocery" in text
+        assert "hardware" not in text
+
+    @pytest.mark.asyncio
+    async def test_lists_includes_empty_when_requested(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            await _add({"items": [{"name": "Eggs"}], "list_name": "grocery"})
+            await _add({"items": [{"name": "Drill"}], "list_name": "hardware"})
+            await _clear({"all": True, "list_name": "hardware"})
+            result = await _lists({"include_empty": True})
+        text = _parse_text(result)
+        assert "grocery" in text
+        assert "hardware" in text
+
+
+# ---------------------------------------------------------------------------
+# TestShoppingListDeleteList (MCP tool)
+# ---------------------------------------------------------------------------
+class TestShoppingListDeleteList:
+    @pytest.mark.asyncio
+    async def test_delete_existing_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            await _add({"items": [{"name": "Drill"}], "list_name": "hardware"})
+            result = await _delete_list({"list_name": "hardware"})
+        assert not _is_error(result)
+        text = _parse_text(result)
+        assert "hardware" in text.lower()
+        with open(f) as fh:
+            data = json.load(fh)
+        assert "hardware" not in data["lists"]
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent_list(self, tmp_path):
+        f = str(tmp_path / "shopping.json")
+        with patch.dict("os.environ", {"SHOPPING_LIST_FILE": f}):
+            result = await _delete_list({"list_name": "nonexistent"})
+        assert not _is_error(result)
+        text = _parse_text(result)
+        assert "not found" in text.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +737,14 @@ class TestBuildShoppingListBlocks:
         assert blocks[0]["type"] == "section"
         text = blocks[0]["text"]["text"].lower()
         assert "empty" in text
+
+    def test_empty_list_includes_list_name(self):
+        """The empty list message includes the list name."""
+        from src.mcp.shopping_list_server import build_shopping_list_blocks
+
+        blocks = build_shopping_list_blocks([], list_name="costco")
+        text = blocks[0]["text"]["text"].lower()
+        assert "costco" in text
 
     def test_unchecked_item_has_checkbox_option(self):
         """Unchecked items appear as checkbox options with name, quantity, unit."""
@@ -497,6 +824,18 @@ class TestBuildShoppingListBlocks:
         header_texts = [h["text"]["text"] for h in headers]
         assert "Dairy" in header_texts
         assert "Bakery" in header_texts
+
+    def test_action_id_includes_list_name(self):
+        """Action IDs include the list name for disambiguation."""
+        from src.mcp.shopping_list_server import build_shopping_list_blocks
+
+        items = [
+            {"name": "Milk", "quantity": 1, "unit": "", "category": "Dairy", "checked": False},
+        ]
+        blocks = build_shopping_list_blocks(items, list_name="costco")
+        actions_blocks = [b for b in blocks if b["type"] == "actions"]
+        action_id = actions_blocks[0]["elements"][0]["action_id"]
+        assert "costco" in action_id
 
 
 # ---------------------------------------------------------------------------
