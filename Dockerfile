@@ -34,8 +34,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && \
     uv pip install --system --no-cache "mcp-server-google-flights @ git+https://github.com/HaroldLeo/google-flights-mcp.git" && \
     apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
-# Copy application source
+# Copy application source and ensure readable permissions
 COPY src/ src/
+RUN chmod -R a+rX src/
 
 # Create non-root user and switch to it
 RUN useradd --create-home appuser
