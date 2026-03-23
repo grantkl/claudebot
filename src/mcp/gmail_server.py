@@ -96,7 +96,7 @@ def _error(text: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 @tool(
     "gmail_list_emails",
-    "List or search Gmail emails using Gmail search syntax. Returns a JSON list with id, threadId, from, to, subject, date, snippet, and labels for each message.",
+    "List or search Gmail emails using Gmail search syntax. Returns a JSON list with id, threadId, from, to, subject, date, snippet, labels, and link (Gmail URL) for each message. Always include the link when sharing results.",
     {
         "type": "object",
         "properties": {
@@ -140,15 +140,17 @@ async def gmail_list_emails(args: dict[str, Any]) -> dict[str, Any]:
                 .execute()
             )
             headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+            thread_id = msg.get("threadId", "")
             results.append({
                 "id": msg["id"],
-                "threadId": msg.get("threadId", ""),
+                "threadId": thread_id,
                 "from": headers.get("From", ""),
                 "to": headers.get("To", ""),
                 "subject": headers.get("Subject", ""),
                 "date": headers.get("Date", ""),
                 "snippet": msg.get("snippet", ""),
                 "labels": msg.get("labelIds", []),
+                "link": f"https://mail.google.com/mail/u/0/#inbox/{thread_id}" if thread_id else "",
             })
 
         return _text(json.dumps(results, indent=2))
@@ -161,7 +163,7 @@ async def gmail_list_emails(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 @tool(
     "gmail_get_email",
-    "Get a specific Gmail email by message ID. Returns full headers and body text.",
+    "Get a specific Gmail email by message ID. Returns full headers, body text, and link (Gmail URL). Always include the link when sharing results.",
     {
         "type": "object",
         "properties": {
@@ -188,15 +190,17 @@ async def gmail_get_email(args: dict[str, Any]) -> dict[str, Any]:
         headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
         body = _extract_body(msg.get("payload", {}))
 
+        thread_id = msg.get("threadId", "")
         result = {
             "id": msg["id"],
-            "threadId": msg.get("threadId", ""),
+            "threadId": thread_id,
             "from": headers.get("From", ""),
             "to": headers.get("To", ""),
             "subject": headers.get("Subject", ""),
             "date": headers.get("Date", ""),
             "labels": msg.get("labelIds", []),
             "body": body,
+            "link": f"https://mail.google.com/mail/u/0/#inbox/{thread_id}" if thread_id else "",
         }
 
         return _text(json.dumps(result, indent=2))
