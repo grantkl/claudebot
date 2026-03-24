@@ -279,7 +279,7 @@ class TaskScheduler:
         recipients = [user_id] if user_id else list(self._config.superuser_ids)
         for recipient in recipients:
             try:
-                await client.chat_postMessage(channel=recipient, text=message)
+                await client.chat_postMessage(channel=recipient, text=message, unfurl_links=False, unfurl_media=False)
             except Exception:
                 logger.exception("Failed to send DM to %s", recipient)
 
