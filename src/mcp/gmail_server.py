@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import os
+from html.parser import HTMLParser
 from typing import Any
 
 from claude_agent_sdk import SdkMcpTool, tool
@@ -81,6 +82,69 @@ def _extract_body(payload: dict[str, Any]) -> str:
                     html_text = result
 
     return plain_text or html_text or ""
+
+
+def _extract_html(payload: dict[str, Any]) -> str:
+    """Recursively walk a MIME payload and return raw HTML if available."""
+    mime_type = payload.get("mimeType", "")
+
+    if mime_type == "text/html":
+        data = payload.get("body", {}).get("data", "")
+        if data:
+            return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+
+    for part in payload.get("parts", []):
+        result = _extract_html(part)
+        if result:
+            return result
+    return ""
+
+
+class _LinkExtractor(HTMLParser):
+    """Extract <a> tags with their href and visible text."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: list[dict[str, str]] = []
+        self._current_href: str | None = None
+        self._current_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "a":
+            href = dict(attrs).get("href", "")
+            if href and href.startswith("http"):
+                self._current_href = href
+                self._current_text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current_href is not None:
+            self._current_text.append(data.strip())
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a" and self._current_href is not None:
+            text = " ".join(t for t in self._current_text if t)
+            # Skip links where the text is just the URL itself or empty
+            if text and not text.startswith("http"):
+                self.links.append({"text": text, "url": self._current_href})
+            self._current_href = None
+            self._current_text = []
+
+
+def _extract_links(payload: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract named links from email HTML body."""
+    html = _extract_html(payload)
+    if not html:
+        return []
+    parser = _LinkExtractor()
+    parser.feed(html)
+    # Deduplicate by URL
+    seen: set[str] = set()
+    unique: list[dict[str, str]] = []
+    for link in parser.links:
+        if link["url"] not in seen:
+            seen.add(link["url"])
+            unique.append(link)
+    return unique
 
 
 def _text(text: str) -> dict[str, Any]:
@@ -161,7 +225,7 @@ async def gmail_list_emails(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 @tool(
     "gmail_get_email",
-    "Get a specific Gmail email by message ID. Returns full headers and body text.",
+"Get a specific Gmail email by message ID. Returns full headers, body text, and links extracted from the email (with text and url). When reporting emails, include links using Slack format: <url|text>.",
     {
         "type": "object",
         "properties": {
@@ -185,8 +249,10 @@ async def gmail_get_email(args: dict[str, Any]) -> dict[str, Any]:
             .execute()
         )
 
-        headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
-        body = _extract_body(msg.get("payload", {}))
+        payload = msg.get("payload", {})
+        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+        body = _extract_body(payload)
+        links = _extract_links(payload)
 
         result = {
             "id": msg["id"],
@@ -197,6 +263,7 @@ async def gmail_get_email(args: dict[str, Any]) -> dict[str, Any]:
             "date": headers.get("Date", ""),
             "labels": msg.get("labelIds", []),
             "body": body,
+            "links": links,
         }
 
         return _text(json.dumps(result, indent=2))

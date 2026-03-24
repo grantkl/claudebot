@@ -251,6 +251,38 @@ class TestGmailGetEmail:
         assert data["from"] == "sender@example.com"
         assert data["subject"] == "Test Email"
         assert "Hello from the email body" in data["body"]
+        assert data["links"] == []  # plain text email has no HTML links
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_extracts_links_from_html(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+
+        html = '<p>Check out <a href="https://example.com/article">this article</a> and <a href="https://example.com/video">watch the video</a></p>'
+        service.users().messages().get().execute.return_value = {
+            "id": "msg456",
+            "threadId": "thread456",
+            "labelIds": ["INBOX"],
+            "payload": {
+                "mimeType": "text/html",
+                "body": {"data": _b64(html)},
+                "headers": [
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "To", "value": "receiver@example.com"},
+                    {"name": "Subject", "value": "Links Email"},
+                    {"name": "Date", "value": "Mon, 1 Mar 2026 12:00:00 -0500"},
+                ],
+            },
+        }
+
+        result = await _get_email({"message_id": "msg456"})
+        data = json.loads(_parse_text(result))
+
+        assert not _is_error(result)
+        assert len(data["links"]) == 2
+        assert data["links"][0] == {"text": "this article", "url": "https://example.com/article"}
+        assert data["links"][1] == {"text": "watch the video", "url": "https://example.com/video"}
 
     @patch.object(gmail_server, "_gmail_service", None)
     @patch("src.mcp.gmail_server._get_gmail_service")
