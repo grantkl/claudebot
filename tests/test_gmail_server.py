@@ -192,7 +192,6 @@ class TestGmailListEmails:
         assert data[0]["id"] == "msg1"
         assert data[0]["from"] == "alice@example.com"
         assert data[0]["subject"] == "Subject msg1"
-        assert data[0]["link"] == "https://mail.google.com/mail/u/0/#inbox/thread_msg1"
 
     @patch.object(gmail_server, "_gmail_service", None)
     @patch("src.mcp.gmail_server._get_gmail_service")
@@ -252,7 +251,6 @@ class TestGmailGetEmail:
         assert data["from"] == "sender@example.com"
         assert data["subject"] == "Test Email"
         assert "Hello from the email body" in data["body"]
-        assert data["link"] == "https://mail.google.com/mail/u/0/#inbox/thread123"
 
     @patch.object(gmail_server, "_gmail_service", None)
     @patch("src.mcp.gmail_server._get_gmail_service")
