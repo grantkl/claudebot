@@ -144,7 +144,7 @@ def _extract_links(payload: dict[str, Any]) -> list[dict[str, str]]:
         if link["url"] not in seen:
             seen.add(link["url"])
             unique.append(link)
-    return unique
+    return unique[:3]
 
 
 def _text(text: str) -> dict[str, Any]:
