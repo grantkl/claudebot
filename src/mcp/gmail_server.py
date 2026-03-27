@@ -225,7 +225,7 @@ async def gmail_list_emails(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 @tool(
     "gmail_get_email",
-"Get a specific Gmail email by message ID. Returns full headers, body text, and links extracted from the email (with text and url). When reporting emails, include links using Slack format: <url|text>.",
+"Get a specific Gmail email by message ID. Returns full headers, body text, links, and slack_links (pre-formatted for Slack). When reporting emails, copy slack_links values verbatim — NEVER show raw URLs.",
     {
         "type": "object",
         "properties": {
@@ -254,6 +254,8 @@ async def gmail_get_email(args: dict[str, Any]) -> dict[str, Any]:
         body = _extract_body(payload)
         links = _extract_links(payload)
 
+        slack_links = [f"<{link['url']}|{link['text']}>" for link in links]
+
         result = {
             "id": msg["id"],
             "threadId": msg.get("threadId", ""),
@@ -264,6 +266,7 @@ async def gmail_get_email(args: dict[str, Any]) -> dict[str, Any]:
             "labels": msg.get("labelIds", []),
             "body": body,
             "links": links,
+            "slack_links": slack_links,
         }
 
         return _text(json.dumps(result, indent=2))

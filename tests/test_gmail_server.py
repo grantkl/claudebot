@@ -252,6 +252,7 @@ class TestGmailGetEmail:
         assert data["subject"] == "Test Email"
         assert "Hello from the email body" in data["body"]
         assert data["links"] == []  # plain text email has no HTML links
+        assert data["slack_links"] == []
 
     @patch.object(gmail_server, "_gmail_service", None)
     @patch("src.mcp.gmail_server._get_gmail_service")
@@ -283,6 +284,10 @@ class TestGmailGetEmail:
         assert len(data["links"]) == 2
         assert data["links"][0] == {"text": "this article", "url": "https://example.com/article"}
         assert data["links"][1] == {"text": "watch the video", "url": "https://example.com/video"}
+        assert data["slack_links"] == [
+            "<https://example.com/article|this article>",
+            "<https://example.com/video|watch the video>",
+        ]
 
     @patch.object(gmail_server, "_gmail_service", None)
     @patch("src.mcp.gmail_server._get_gmail_service")
