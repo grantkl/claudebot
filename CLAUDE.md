@@ -49,7 +49,7 @@ Three tiers, determined by `SUPERUSER_IDS` and `AUTHORIZED_USER_IDS` env vars. N
 
 | Tier | Model | MCP Servers | Blocked Tools | Rate Limited |
 |---|---|---|---|---|
-| Superuser | opus | sonos + homekit + gmail + scheduler + flights + flight_watch + seats_aero + playwright + stocks + web_search + shopping_list | None | No |
+| Superuser | opus | sonos + homekit + gmail + calendar + scheduler + flights + flight_watch + seats_aero + playwright + stocks + web_search + shopping_list | None | No |
 | Authorized | sonnet | sonos + homekit + flights + flight_watch + scheduler + playwright + stocks + web_search + shopping_list | Bash, Read, Edit, Write, Glob, Grep | No |
 | Everyone else | haiku | stocks + web_search | Bash, Read, Edit, Write, Glob, Grep | Yes |
 
@@ -70,6 +70,7 @@ When `ENABLE_MCP=true`, MCP servers are built once at startup and selectively in
 - **Sonos** — always loaded; controls Sonos speakers via configured IPs or network discovery
 - **HomeKit** — always loaded; controls HomeKit devices via pairing data from a JSON file (or HomeClaw HTTP bridge if `HOMECLAW_MCP_URL` is set)
 - **Gmail** — conditionally loaded when both `GMAIL_CREDENTIALS_FILE` and `GMAIL_TOKEN_FILE` are set; list, search, read, star/unstar, and mark-as-read (no send). Superuser-only. OAuth setup: `python scripts/gmail-auth.py`
+- **Calendar** — conditionally loaded when both `GMAIL_CREDENTIALS_FILE` and `GMAIL_TOKEN_FILE` are set; uses the same Google OAuth2 credentials as Gmail with the calendar scope. Superuser-only. Tools: calendar_list_events, calendar_get_event, calendar_create_event, calendar_update_event, calendar_delete_event.
 - **Scheduler** — conditionally loaded when `SCHEDULER_ENABLED=true`; manages autonomous background tasks (email digests, smart home routines, custom prompts) on cron schedules or polling intervals. Superuser-only. Tasks defined in `config/tasks.yaml`, state persisted in `data/scheduler_state.json`.
 - **Flights** — conditionally loaded when `FLIGHTS_ENABLED=true`; subprocess stdio MCP server (`@privilegemendes/amadeus-mcp-server`) using the official Amadeus API. Available to superuser and authorized tiers (not free-tier users, since API calls have cost). Tools: search-flights, search-airports, flight-price-analysis, flight-inspiration, airport-routes, nearest-airports.
 - **Flight Watch** — conditionally loaded when `FLIGHTS_ENABLED=true`; manages flight price watches with automatic periodic checks. Supports both route-based watches (origin/destination on flexible dates) and specific flight tracking by airline and flight number for booked itineraries. Superuser and authorized tiers. Tools: flight_watch_add, flight_watch_list, flight_watch_remove, flight_watch_record, flight_watch_history.
@@ -146,7 +147,7 @@ Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional
 
 - `AUTHORIZED_USER_IDS` — comma-separated Slack user IDs for authorized (sonnet) access
 - `SUPERUSER_IDS` — comma-separated Slack user IDs for superuser (opus + gmail) access; must also be in `AUTHORIZED_USER_IDS` or they'll be auto-promoted
-- `GMAIL_CREDENTIALS_FILE` / `GMAIL_TOKEN_FILE` — paths to Google OAuth2 credentials and token files for Gmail MCP
+- `GMAIL_CREDENTIALS_FILE` / `GMAIL_TOKEN_FILE` — paths to Google OAuth2 credentials and token files for Gmail and Calendar MCPs. Calendar requires the calendar scope; re-run `python scripts/gmail-auth.py` to add it if the existing token lacks it
 - `SCHEDULER_ENABLED` — set to `true` to enable the autonomous task scheduler
 - `SCHEDULER_TASKS_FILE` — path to tasks YAML file (default `config/tasks.yaml`)
 - `SCHEDULER_STATE_FILE` — path to state JSON file (default `data/scheduler_state.json`)

@@ -10,7 +10,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/calendar",
+]
 
 
 def main() -> None:
