@@ -13,7 +13,7 @@ RUN apt-get update && \
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
-# RUN npm install -g @privilegemendes/amadeus-mcp-server  # Disabled: no production API key
+RUN npm install -g @privilegemendes/amadeus-mcp-server
 RUN npm install -g @modelcontextprotocol/server-brave-search
 
 # Install Playwright MCP and browser dependencies for headless Chromium
