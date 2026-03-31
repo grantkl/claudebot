@@ -22,10 +22,12 @@ from src.mcp import _resolve_amadeus_path, _resolve_playwright_path, build_mcp_s
 class TestBuildMcpServersFlights:
     @patch("src.mcp._resolve_amadeus_path", return_value="/usr/lib/node_modules/@privilegemendes/amadeus-mcp-server/dist/index.js")
     @patch.dict("os.environ", {"FLIGHTS_ENABLED": "true", "AMADEUS_CLIENT_ID": "test-id", "AMADEUS_CLIENT_SECRET": "test-secret"}, clear=False)
-    def test_amadeus_disabled_even_when_flights_enabled(self, mock_resolve):
-        """Amadeus is currently disabled (no production key)."""
+    def test_amadeus_enabled_when_flights_enabled(self, mock_resolve):
+        """Amadeus is loaded when FLIGHTS_ENABLED and path resolves."""
         servers = build_mcp_servers()
-        assert "flights" not in servers
+        assert "flights" in servers
+        assert servers["flights"]["type"] == "stdio"
+        assert servers["flights"]["command"] == "node"
 
     @patch("src.mcp._resolve_amadeus_path", return_value="/some/path/index.js")
     @patch.dict("os.environ", {"FLIGHTS_ENABLED": "false"}, clear=False)

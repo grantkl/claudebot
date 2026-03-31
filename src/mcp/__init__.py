@@ -75,10 +75,17 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
 
     flights_enabled = os.environ.get("FLIGHTS_ENABLED", "").lower() in ("1", "true", "yes")
     if flights_enabled:
-        # Amadeus disabled — no production API key available
-        # amadeus_path = _resolve_amadeus_path()
-        # if amadeus_path:
-        #     servers["flights"] = { ... }
+        amadeus_path = _resolve_amadeus_path()
+        if amadeus_path:
+            servers["flights"] = {
+                "type": "stdio",
+                "command": "node",
+                "args": [amadeus_path],
+                "env": {
+                    "AMADEUS_CLIENT_ID": os.environ.get("AMADEUS_CLIENT_ID", ""),
+                    "AMADEUS_CLIENT_SECRET": os.environ.get("AMADEUS_CLIENT_SECRET", ""),
+                },
+            }
 
         from .flight_watch_server import FLIGHT_WATCH_TOOLS
         servers["flight_watch"] = create_sdk_mcp_server(
