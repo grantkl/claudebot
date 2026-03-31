@@ -47,7 +47,7 @@ class TestBuildMcpServersGoogleFlights:
         servers = build_mcp_servers()
         assert "google_flights" in servers
         assert servers["google_flights"]["type"] == "stdio"
-        assert servers["google_flights"]["command"] == "google-flights-mcp"
+        assert servers["google_flights"]["command"] == "mcp-server-google-flights"
 
     @patch.dict("os.environ", {"GOOGLE_FLIGHTS_ENABLED": "true", "SERPAPI_API_KEY": "test-key"}, clear=False)
     def test_google_flights_with_serpapi_key(self):
