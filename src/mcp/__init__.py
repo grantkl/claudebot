@@ -69,6 +69,10 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
 
         servers["gmail"] = create_sdk_mcp_server(name="gmail", version="1.0.0", tools=GMAIL_TOOLS)
 
+        from .calendar_server import CALENDAR_TOOLS
+
+        servers["calendar"] = create_sdk_mcp_server(name="calendar", version="1.0.0", tools=CALENDAR_TOOLS)
+
     flights_enabled = os.environ.get("FLIGHTS_ENABLED", "").lower() in ("1", "true", "yes")
     if flights_enabled:
         # Amadeus disabled — no production API key available

@@ -14,6 +14,7 @@ sys.modules.setdefault("src.mcp.homekit_server", MagicMock())
 sys.modules.setdefault("src.mcp.gmail_server", MagicMock())
 sys.modules.setdefault("src.mcp.flight_watch_server", MagicMock())
 sys.modules.setdefault("src.mcp.stocks_server", MagicMock())
+sys.modules.setdefault("src.mcp.calendar_server", MagicMock())
 
 from src.mcp import _resolve_amadeus_path, _resolve_playwright_path, build_mcp_servers  # noqa: E402
 
@@ -174,3 +175,48 @@ class TestBuildMcpServersWebSearch:
         os.environ.pop("BRAVE_API_KEY", None)
         servers = build_mcp_servers()
         assert "web_search" not in servers
+
+
+class TestBuildMcpServersCalendar:
+    @patch.dict(
+        "os.environ",
+        {"GMAIL_CREDENTIALS_FILE": "/path/to/creds.json", "GMAIL_TOKEN_FILE": "/path/to/token.json"},
+        clear=False,
+    )
+    def test_calendar_loaded_when_gmail_credentials_set(self):
+        """Calendar piggybacks on Gmail credentials and should be loaded when both are present."""
+        servers = build_mcp_servers()
+        assert "calendar" in servers
+
+    @patch.dict("os.environ", {}, clear=False)
+    def test_calendar_not_loaded_when_gmail_credentials_missing(self):
+        """Calendar should not be loaded when Gmail credential env vars are absent."""
+        import os
+        os.environ.pop("GMAIL_CREDENTIALS_FILE", None)
+        os.environ.pop("GMAIL_TOKEN_FILE", None)
+        servers = build_mcp_servers()
+        assert "calendar" not in servers
+
+    @patch.dict(
+        "os.environ",
+        {"GMAIL_CREDENTIALS_FILE": "/path/to/creds.json"},
+        clear=False,
+    )
+    def test_calendar_not_loaded_when_only_credentials_file_set(self):
+        """Calendar should not load when only GMAIL_CREDENTIALS_FILE is set (no token)."""
+        import os
+        os.environ.pop("GMAIL_TOKEN_FILE", None)
+        servers = build_mcp_servers()
+        assert "calendar" not in servers
+
+    @patch.dict(
+        "os.environ",
+        {"GMAIL_TOKEN_FILE": "/path/to/token.json"},
+        clear=False,
+    )
+    def test_calendar_not_loaded_when_only_token_file_set(self):
+        """Calendar should not load when only GMAIL_TOKEN_FILE is set (no credentials)."""
+        import os
+        os.environ.pop("GMAIL_CREDENTIALS_FILE", None)
+        servers = build_mcp_servers()
+        assert "calendar" not in servers
