@@ -13,7 +13,9 @@ RUN apt-get update && \
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
-RUN npm install -g @privilegemendes/amadeus-mcp-server
+RUN npm install -g @privilegemendes/amadeus-mcp-server && \
+    sed -i 's/clientSecret: process.env.AMADEUS_CLIENT_SECRET,/clientSecret: process.env.AMADEUS_CLIENT_SECRET, hostname: process.env.AMADEUS_HOSTNAME || "test",/' \
+    /usr/lib/node_modules/@privilegemendes/amadeus-mcp-server/dist/index.js
 RUN npm install -g @modelcontextprotocol/server-brave-search
 
 # Install Playwright MCP and browser dependencies for headless Chromium
