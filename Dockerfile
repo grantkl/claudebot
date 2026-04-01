@@ -42,6 +42,13 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     apt-get update && apt-get install -y --no-install-recommends gh && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Fix: google-flights-mcp passes seat_type with underscores (e.g. premium_economy)
+# but fast_flights expects dashes (premium-economy), causing KeyError
+RUN python3 -c "\
+import pathlib; \
+p = pathlib.Path('/usr/local/lib/python3.12/site-packages/mcp_server_google_flights/server.py'); \
+p.write_text(p.read_text().replace('seat=seat_type,', 'seat=seat_type.replace(\"_\", \"-\"),'))"
+
 # Copy application source and ensure readable permissions
 COPY src/ src/
 RUN chmod -R a+rX src/
