@@ -526,9 +526,9 @@ class TestSlackApp:
         event = _make_event(
             user="U001", text="<@B001> check this",
             files=[{
-                "name": "report.pdf",
-                "mimetype": "application/pdf",
-                "url_private": "https://files.slack.com/report.pdf",
+                "name": "archive.zip",
+                "mimetype": "application/zip",
+                "url_private": "https://files.slack.com/archive.zip",
             }],
         )
         handler = app._handlers["app_mention"]
@@ -536,7 +536,7 @@ class TestSlackApp:
 
         call_args = claude_manager.send_message.call_args
         sent_text = call_args[0][1]
-        assert "[Attached file: report.pdf (application/pdf) - binary file, contents not included]" in sent_text
+        assert "[Attached file: archive.zip (application/zip) - binary file, contents not included]" in sent_text
         # images should be None (empty list → None)
         assert call_args.kwargs["images"] is None
 

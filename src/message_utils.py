@@ -92,6 +92,30 @@ def format_thread_context(messages: list[dict[str, str]], bot_user_id: str) -> s
     return "\n".join(lines)
 
 
+def extract_pdf_text(data: bytes, filename: str) -> str:
+    """Extract text from PDF bytes using PyMuPDF.
+
+    Returns extracted text, or an error placeholder if extraction fails.
+    """
+    import pymupdf
+
+    try:
+        doc = pymupdf.open(stream=data, filetype="pdf")
+    except Exception:
+        return f"[Could not read PDF: {filename} — file may be corrupted or encrypted]"
+
+    pages: list[str] = []
+    for i, page in enumerate(doc):
+        text = page.get_text()
+        if text.strip():
+            pages.append(f"--- Page {i + 1} ---\n{text.strip()}")
+    doc.close()
+
+    if not pages:
+        return f"[PDF {filename} contained no extractable text (may be scanned/image-only)]"
+    return "\n\n".join(pages)
+
+
 _MIMETYPE_TO_LANG: dict[str, str] = {
     "application/json": "json",
     "application/javascript": "javascript",

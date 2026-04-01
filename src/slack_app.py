@@ -16,6 +16,7 @@ from .config import Config
 from .message_utils import (
     extract_image_paths,
     extract_large_code_blocks,
+    extract_pdf_text,
     format_error_message,
     format_file_attachments,
     format_thread_context,
@@ -111,6 +112,16 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                         files_content.append(
                             (file["name"], mimetype, resp.text)
                         )
+                    elif mimetype == "application/pdf":
+                        resp = await http_client.get(url)
+                        if resp.status_code == 200 and resp.content:
+                            pdf_text = extract_pdf_text(resp.content, file["name"])
+                            files_content.append(
+                                (file["name"], "text/plain", pdf_text)
+                            )
+                        else:
+                            logger.warning("Failed to download PDF %s: HTTP %d", file["name"], resp.status_code)
+                            cleaned_text += f"\n\n[Attached PDF: {file['name']} - failed to download]"
                     elif mimetype in IMAGE_MIMETYPES:
                         resp = await http_client.get(url)
                         if resp.status_code == 200 and resp.content:
