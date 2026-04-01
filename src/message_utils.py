@@ -116,6 +116,18 @@ def extract_pdf_text(data: bytes, filename: str) -> str:
     return "\n\n".join(pages)
 
 
+_BOLD_LINK_RE = re.compile(r"\*\*(https?://[^\s*]+)\*\*")
+
+
+def strip_bold_links(text: str) -> str:
+    """Remove bold markers (**) surrounding URLs.
+
+    Slack auto-unfurls URLs, but ``**`` wrapping breaks the link detection.
+    This replaces ``**https://example.com**`` with ``https://example.com``.
+    """
+    return _BOLD_LINK_RE.sub(r"\1", text)
+
+
 _MIMETYPE_TO_LANG: dict[str, str] = {
     "application/json": "json",
     "application/javascript": "javascript",

@@ -21,6 +21,7 @@ from .message_utils import (
     format_file_attachments,
     format_thread_context,
     split_message,
+    strip_bold_links,
     strip_bot_mention,
 )
 from .rate_limiter import RATE_LIMIT_MESSAGE, RateLimiter
@@ -195,6 +196,7 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                 except FileNotFoundError:
                     logger.warning("Screenshot not found: %s", img.path)
             post_text = modified_text2 if image_files else post_text
+            post_text = strip_bold_links(post_text)
 
             if result.used_shopping_list_view:
                 store = _get_store()
