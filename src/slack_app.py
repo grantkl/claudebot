@@ -16,10 +16,12 @@ from .config import Config
 from .message_utils import (
     extract_image_paths,
     extract_large_code_blocks,
+    extract_pdf_text,
     format_error_message,
     format_file_attachments,
     format_thread_context,
     split_message,
+    strip_bold_links,
     strip_bot_mention,
 )
 from .rate_limiter import RATE_LIMIT_MESSAGE, RateLimiter
@@ -111,6 +113,16 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                         files_content.append(
                             (file["name"], mimetype, resp.text)
                         )
+                    elif mimetype == "application/pdf":
+                        resp = await http_client.get(url)
+                        if resp.status_code == 200 and resp.content:
+                            pdf_text = extract_pdf_text(resp.content, file["name"])
+                            files_content.append(
+                                (file["name"], "text/plain", pdf_text)
+                            )
+                        else:
+                            logger.warning("Failed to download PDF %s: HTTP %d", file["name"], resp.status_code)
+                            cleaned_text += f"\n\n[Attached PDF: {file['name']} - failed to download]"
                     elif mimetype in IMAGE_MIMETYPES:
                         resp = await http_client.get(url)
                         if resp.status_code == 200 and resp.content:
@@ -184,6 +196,7 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                 except FileNotFoundError:
                     logger.warning("Screenshot not found: %s", img.path)
             post_text = modified_text2 if image_files else post_text
+            post_text = strip_bold_links(post_text)
 
             if result.used_shopping_list_view:
                 store = _get_store()
