@@ -804,7 +804,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="opus", mcp_server_names={"sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "playwright", "stocks", "web_search", "shopping_list", "calendar"}, images=None,
+            model="opus", mcp_server_names={"sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "playwright", "stocks", "web_search", "shopping_list", "calendar", "deploy"}, images=None,
             disallowed_tools=None, authorized=True, superuser=True,
             user_id="U001",
             user_name="TestUser",

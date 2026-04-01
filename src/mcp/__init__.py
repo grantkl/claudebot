@@ -133,6 +133,11 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
         from .stocks_server import STOCKS_TOOLS
         servers["stocks"] = create_sdk_mcp_server(name="stocks", version="1.0.0", tools=STOCKS_TOOLS)
 
+    deploy_enabled = os.environ.get("DEPLOY_ENABLED", "").lower() in ("1", "true", "yes")
+    if deploy_enabled:
+        from .deploy_server import DEPLOY_TOOLS
+        servers["deploy"] = create_sdk_mcp_server(name="deploy", version="1.0.0", tools=DEPLOY_TOOLS)
+
     brave_api_key = os.environ.get("BRAVE_API_KEY", "")
     if brave_api_key:
         servers["web_search"] = {

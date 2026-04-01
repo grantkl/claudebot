@@ -49,7 +49,7 @@ Three tiers, determined by `SUPERUSER_IDS` and `AUTHORIZED_USER_IDS` env vars. N
 
 | Tier | Model | MCP Servers | Blocked Tools | Rate Limited |
 |---|---|---|---|---|
-| Superuser | opus | sonos + homekit + gmail + calendar + scheduler + flights + flight_watch + seats_aero + playwright + stocks + web_search + shopping_list | None | No |
+| Superuser | opus | sonos + homekit + gmail + calendar + scheduler + flights + flight_watch + seats_aero + playwright + stocks + web_search + shopping_list + deploy | None | No |
 | Authorized | sonnet | sonos + homekit + flights + flight_watch + scheduler + playwright + stocks + web_search + shopping_list | Bash, Read, Edit, Write, Glob, Grep | No |
 | Everyone else | haiku | stocks + web_search | Bash, Read, Edit, Write, Glob, Grep | Yes |
 
@@ -79,6 +79,7 @@ When `ENABLE_MCP=true`, MCP servers are built once at startup and selectively in
 - **Shopping List** — conditionally loaded when `SHOPPING_LIST_ENABLED=true`; manages a shared shopping list with JSON persistence and recipe storage. Available to superuser and authorized tiers. Tools: shopping_list_add, shopping_list_view, shopping_list_remove, shopping_list_check, shopping_list_uncheck, shopping_list_clear, recipe_save, recipe_list, recipe_view, recipe_delete.
 - **Stocks** — conditionally loaded when `STOCKS_ENABLED=true`; provides real-time stock quotes, options chains, and technical indicators via yfinance. No API key required. Available to all tiers. Tools: stock_quote, options_expirations, options_chain, stock_technicals.
 - **Web Search** — conditionally loaded when `BRAVE_API_KEY` is set; web search via Brave Search API (`@modelcontextprotocol/server-brave-search`). Available to all tiers. Tools: brave_web_search.
+- **Deploy** — conditionally loaded when `DEPLOY_ENABLED=true`; triggers a deploy of the ClaudeBot Docker container on the host. Superuser-only. Tools: trigger_deploy.
 
 ### Autonomous Task Scheduler
 
@@ -164,6 +165,7 @@ Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional
 - `SHOPPING_LIST_ENABLED` — set to `true` to enable the shopping list MCP
 - `SHOPPING_LIST_FILE` — path to shopping list data file (default `data/shopping_list.json`)
 - `RECIPE_FILE` — path to recipe storage file (default `data/recipes.json`)
+- `DEPLOY_ENABLED` — set to `true` to enable the deploy MCP (superuser-only, triggers Docker redeploy)
 - `WEBHOOK_ENABLED` — set to `true` to enable the HTTP webhook server for external signal ingestion
 - `WEBHOOK_PORT` — port for the webhook server (default `8081`)
 - `WEBHOOK_SECRET` — Bearer token secret for authenticating webhook requests
