@@ -38,6 +38,10 @@ class SessionEntry:
     authorized: bool = False
     superuser: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Tracks which MCP servers are currently toggled *on* for this session.
+    enabled_servers: set[str] = field(default_factory=set)
+    # The full set of MCP server names this session was created with.
+    all_server_names: set[str] = field(default_factory=set)
 
 
 class ClaudeManager:
@@ -82,7 +86,7 @@ class ClaudeManager:
     async def remove_session(self, thread_ts: str) -> None:
         await self._remove_session(thread_ts)
 
-    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None, user_name: str | None = None, _retry: bool = True) -> SendMessageResult:
+    async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, needed_servers: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None, user_name: str | None = None, _retry: bool = True) -> SendMessageResult:
         is_new_session = thread_ts not in self._sessions
         if is_new_session:
             system_prompt = self._config.claude_system_prompt
@@ -218,9 +222,18 @@ class ClaudeManager:
                 )
             )
             await client.connect()
+            # Start with all MCP servers disabled — we selectively enable
+            # only the servers needed for each message via toggle.
+            server_names_in_session = set(mcp_servers.keys())
+            for name in server_names_in_session:
+                try:
+                    await client.toggle_mcp_server(name, enabled=False)
+                except Exception:
+                    logger.warning("Failed to disable MCP server %s at session start", name)
             self._sessions[thread_ts] = SessionEntry(
                 client=client, last_accessed=time.time(), authorized=authorized,
                 superuser=superuser,
+                all_server_names=server_names_in_session,
             )
 
         query_text = text
@@ -237,6 +250,25 @@ class ClaudeManager:
         entry = self._sessions[thread_ts]
         async with entry.lock:
             entry.last_accessed = time.time()
+
+            # Sync enabled MCP servers to match what this message needs.
+            want = (needed_servers or set()) & entry.all_server_names
+            to_disable = entry.enabled_servers - want
+            to_enable = want - entry.enabled_servers
+            for name in to_disable:
+                try:
+                    await entry.client.toggle_mcp_server(name, enabled=False)
+                except Exception:
+                    logger.warning("Failed to disable MCP server %s", name)
+            for name in to_enable:
+                try:
+                    await entry.client.toggle_mcp_server(name, enabled=True)
+                except Exception:
+                    logger.warning("Failed to enable MCP server %s", name)
+            entry.enabled_servers = want
+            if want:
+                logger.info("Session %s MCP servers enabled: %s", thread_ts, want)
+
             try:
                 if images:
                     content: list[dict[str, Any]] = [{"type": "text", "text": query_text}]
@@ -296,6 +328,7 @@ class ClaudeManager:
                     return await self.send_message(
                         thread_ts, text, thread_context=thread_context,
                         model=model, mcp_server_names=mcp_server_names,
+                        needed_servers=needed_servers,
                         images=images, disallowed_tools=disallowed_tools,
                         authorized=authorized, superuser=superuser,
                         user_id=user_id, user_name=user_name, _retry=False,
