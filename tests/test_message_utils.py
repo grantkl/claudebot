@@ -80,7 +80,17 @@ class TestFormatErrorMessage:
     def test_returns_user_friendly_string(self):
         error = RuntimeError("something broke")
         result = format_error_message(error)
-        assert result == "I encountered an error processing your request (`RuntimeError`). Please try again."
+        assert "Something unexpected went wrong" in result
+
+    def test_timeout_error_classified(self):
+        error = TimeoutError("connection timed out")
+        result = format_error_message(error)
+        assert "timed out" in result
+
+    def test_connection_error_classified(self):
+        error = ConnectionError("refused")
+        result = format_error_message(error)
+        assert "external service" in result.lower()
 
 
 class TestFormatThreadContext:

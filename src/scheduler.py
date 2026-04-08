@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo
 import yaml
 from croniter import croniter
 
+from .error_utils import classify_error
+
 if TYPE_CHECKING:
     from .claude_client import ClaudeManager
     from .config import Config
@@ -249,19 +251,23 @@ class TaskScheduler:
                 logger.info("One-time task %s auto-disabled after execution", task_id)
 
             logger.info("Task %s completed successfully", task_id)
-        except Exception:
-            logger.exception("Task %s failed", task_id)
+        except Exception as exc:
+            classified = classify_error(exc)
+            logger.exception(
+                "Task %s (%s) failed [%s]: %s",
+                task.name, task_id, classified.category, classified.log_message,
+            )
             state.consecutive_failures += 1
             if state.consecutive_failures >= 5:
                 state.paused = True
                 logger.warning(
-                    "Task %s paused after %d consecutive failures",
-                    task_id,
-                    state.consecutive_failures,
+                    "Task %s (%s) paused after %d consecutive failures",
+                    task.name, task_id, state.consecutive_failures,
                 )
                 await self._send_dm(
                     f"Scheduled task *{task.name}* has been automatically paused "
-                    f"after {state.consecutive_failures} consecutive failures.",
+                    f"after {state.consecutive_failures} consecutive failures.\n"
+                    f"Last error ({classified.category}): {classified.log_message}",
                     "Scheduler Alert",
                     user_id=task.created_by,
                 )

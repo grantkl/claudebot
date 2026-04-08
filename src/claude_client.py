@@ -27,6 +27,7 @@ from claude_agent_sdk import (
 )
 
 from .config import Config
+from .error_utils import classify_error
 
 logger = logging.getLogger(__name__)
 
@@ -286,12 +287,13 @@ class ClaudeManager:
                     if new_paths:
                         text += "\n" + "\n".join(new_paths)
                 return SendMessageResult(text=text, used_shopping_list_view=used_shopping_list_view)
-            except Exception:
+            except Exception as exc:
+                classified = classify_error(exc)
                 await self._remove_session(thread_ts)
                 if _retry:
                     logger.warning(
-                        "Session error for thread %s, retrying with fresh session",
-                        thread_ts,
+                        "Session error for thread %s [%s]: %s — retrying with fresh session",
+                        thread_ts, classified.category, classified.log_message,
                     )
                     return await self.send_message(
                         thread_ts, text, thread_context=thread_context,
@@ -301,8 +303,8 @@ class ClaudeManager:
                         user_id=user_id, user_name=user_name, _retry=False,
                     )
                 logger.exception(
-                    "Error in Claude session for thread %s (retry exhausted)",
-                    thread_ts,
+                    "Error in Claude session for thread %s (retry exhausted) [%s]: %s",
+                    thread_ts, classified.category, classified.log_message,
                 )
                 raise
 

@@ -11,6 +11,8 @@ from typing import Any
 
 from claude_agent_sdk import SdkMcpTool, tool
 
+from ..error_utils import classify_error
+
 logger = logging.getLogger(__name__)
 
 # Module-level cached service
@@ -217,7 +219,9 @@ async def gmail_list_emails(args: dict[str, Any]) -> dict[str, Any]:
 
         return _text(json.dumps(results, indent=2))
     except Exception as e:
-        return _error(f"Failed to list emails: {e}")
+        classified = classify_error(e)
+        logger.exception("gmail_list_emails failed [%s]: %s", classified.category, classified.log_message)
+        return _error(f"Failed to list emails ({classified.category}): {classified.log_message}")
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +275,9 @@ async def gmail_get_email(args: dict[str, Any]) -> dict[str, Any]:
 
         return _text(json.dumps(result, indent=2))
     except Exception as e:
-        return _error(f"Failed to get email: {e}")
+        classified = classify_error(e)
+        logger.exception("gmail_get_email failed [%s]: %s", classified.category, classified.log_message)
+        return _error(f"Failed to get email ({classified.category}): {classified.log_message}")
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +310,9 @@ async def gmail_mark_as_read(args: dict[str, Any]) -> dict[str, Any]:
 
         return _text(f"Message {message_id} marked as read.")
     except Exception as e:
-        return _error(f"Failed to mark as read: {e}")
+        classified = classify_error(e)
+        logger.exception("gmail_mark_as_read failed [%s]: %s", classified.category, classified.log_message)
+        return _error(f"Failed to mark as read ({classified.category}): {classified.log_message}")
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +356,9 @@ async def gmail_star_email(args: dict[str, Any]) -> dict[str, Any]:
         action = "starred" if star else "unstarred"
         return _text(f"Message {message_id} {action}.")
     except Exception as e:
-        return _error(f"Failed to star email: {e}")
+        classified = classify_error(e)
+        logger.exception("gmail_star_email failed [%s]: %s", classified.category, classified.log_message)
+        return _error(f"Failed to star email ({classified.category}): {classified.log_message}")
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +409,9 @@ async def gmail_check_alerted(args: dict[str, Any]) -> dict[str, Any]:
         _save_alerted(alerted)
         return _text(json.dumps(new_ids))
     except Exception as e:
-        return _error(f"Failed to check alerted emails: {e}")
+        classified = classify_error(e)
+        logger.exception("gmail_check_alerted failed [%s]: %s", classified.category, classified.log_message)
+        return _error(f"Failed to check alerted emails ({classified.category}): {classified.log_message}")
 
 
 # ---------------------------------------------------------------------------

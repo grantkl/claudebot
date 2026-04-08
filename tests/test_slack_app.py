@@ -206,9 +206,9 @@ class TestSlackApp:
         handler = app._handlers["app_mention"]
         await handler(event=event, say=say, client=client)
 
-        # Error message posted
+        # Error message posted (classified as internal/unknown error)
         say.assert_called_once_with(
-            text="I encountered an error processing your request (`RuntimeError`). Please try again.",
+            text="Something unexpected went wrong. The error has been logged.",
             thread_ts=event["ts"],
         )
 
