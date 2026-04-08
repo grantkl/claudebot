@@ -28,6 +28,81 @@ from .rate_limiter import RATE_LIMIT_MESSAGE, RateLimiter
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Keyword → MCP server mapping for lazy tool loading.
+#
+# Instead of sending every MCP tool schema in every API request (which can
+# push the payload past the 20 MB limit), we classify each message and only
+# enable the servers whose tools are actually relevant.
+# ---------------------------------------------------------------------------
+
+_SERVER_KEYWORD_RULES: list[tuple[set[str], re.Pattern[str]]] = [
+    ({"sonos"}, re.compile(
+        r"\bsonos\b|\bmusic\b|\bspeaker\b|\bvolume\b|\bplay\b|\bpause\b"
+        r"|\bresume\b|\bskip\b|\bqueue\b|\bsong\b|\balbum\b|\bplaylist\b"
+        r"|\btrack\b|\bnow playing\b|\bapple music\b|\bfavorite\b",
+        re.IGNORECASE,
+    )),
+    ({"homekit"}, re.compile(
+        r"\bhomekit\b|\bhome kit\b|\blight\b|\blamp\b|\bswitch\b"
+        r"|\bthermostat\b|\block\b|\bfan\b|\bblind\b|\bshade\b|\bsensor\b"
+        r"|\btemperature\b|\bturn on\b|\bturn off\b|\bbrightness\b|\bdoor\b"
+        r"|\bgarage\b|\bscene\b|\bautomation\b|\baccessor",
+        re.IGNORECASE,
+    )),
+    ({"gmail"}, re.compile(
+        r"\bemail\b|\bgmail\b|\binbox\b|\bunread\b|\bmail\b",
+        re.IGNORECASE,
+    )),
+    ({"calendar"}, re.compile(
+        r"\bcalendar\b|\bmeeting\b|\bappointment\b",
+        re.IGNORECASE,
+    )),
+    ({"scheduler"}, re.compile(
+        r"\bschedule\b|\btask\b|\bcron\b|\breminder\b|\brecurring\b|\bremind\b",
+        re.IGNORECASE,
+    )),
+    ({"flights", "flight_watch", "google_flights", "seats_aero"}, re.compile(
+        r"\bflights?\b|\bairport\b|\bairline\b|\bfly\b|\bflying\b|\bboarding\b",
+        re.IGNORECASE,
+    )),
+    ({"seats_aero"}, re.compile(
+        r"\baward\b|\bpoints\b|\bmiles\b",
+        re.IGNORECASE,
+    )),
+    ({"stocks"}, re.compile(
+        r"\bstocks?\b|\boptions?\b|\bticker\b|\bmarket\b"
+        r"|\bputs?\b|\bcalls?\b|\bearnings\b|\$[A-Z]{1,5}\b",
+        re.IGNORECASE,
+    )),
+    ({"web_search"}, re.compile(
+        r"\bsearch\b|\blook up\b|\bgoogle\b|\bnews\b|\blatest\b",
+        re.IGNORECASE,
+    )),
+    ({"playwright"}, re.compile(
+        r"\bbrowse\b|\bwebsite\b|\bscreenshot\b|\bweb ?page\b"
+        r"|\bnavigate\b|\bplaywright\b",
+        re.IGNORECASE,
+    )),
+    ({"shopping_list"}, re.compile(
+        r"\bgrocery\b|\bshopping list\b|\brecipe\b|\bingredients?\b|\bcostco\b",
+        re.IGNORECASE,
+    )),
+    ({"deploy"}, re.compile(
+        r"\bdeploy\b|\brebuild\b",
+        re.IGNORECASE,
+    )),
+]
+
+
+def classify_needed_servers(text: str) -> set[str]:
+    """Determine which MCP servers are relevant based on message content."""
+    needed: set[str] = set()
+    for servers, pattern in _SERVER_KEYWORD_RULES:
+        if pattern.search(text):
+            needed |= servers
+    return needed
+
 
 def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: RateLimiter) -> AsyncApp:
     app = AsyncApp(token=config.slack_bot_token)
@@ -64,12 +139,20 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         else:
             disallowed_tools = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 
+        # Determine the full set of servers this user is *allowed* to use
+        # (authorization gate — unchanged from before).
         if superuser:
             mcp_server_names: set[str] = {"sonos", "homekit", "gmail", "calendar", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "playwright", "stocks", "web_search", "shopping_list"}
         elif authorized:
             mcp_server_names = {"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}
         else:
             mcp_server_names = {"stocks", "web_search"}
+
+        # Lazy loading: only enable servers whose tools are relevant to
+        # this particular message.  The full authorized set is still passed
+        # so the session *has* every server available — but only the needed
+        # subset is toggled on before each API call.
+        needed_servers = classify_needed_servers(cleaned_text) & mcp_server_names
 
         # Thread history hydration for cold sessions in existing threads
         thread_context: str | None = None
@@ -159,6 +242,7 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             result = await claude_manager.send_message(
                 thread_ts, cleaned_text, thread_context=thread_context,
                 model=model, mcp_server_names=mcp_server_names,
+                needed_servers=needed_servers,
                 images=images if images else None,
                 disallowed_tools=disallowed_tools,
                 authorized=authorized,
