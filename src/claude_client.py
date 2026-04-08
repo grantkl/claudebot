@@ -194,12 +194,13 @@ class ClaudeManager:
                     " then options_chain (specific strikes). Be direct and"
                     " concise — the user wants actionable analysis, not disclaimers."
                 )
-            if mcp_server_names and "web_search" in mcp_server_names:
+            use_web_search = bool(mcp_server_names and "web_search" in mcp_server_names)
+            if use_web_search:
                 system_prompt += (
-                    "\n\nYou have access to web search via Brave Search MCP tools."
-                    " Use this for current news, earnings dates, analyst ratings,"
-                    " macro events, and any real-time information not available"
-                    " through other tools."
+                    "\n\nYou have access to web search via the built-in WebSearch and"
+                    " WebFetch tools. Use this for current news, earnings dates,"
+                    " analyst ratings, macro events, and any real-time information"
+                    " not available through other tools."
                 )
             if set(mcp_servers) != set(self._mcp_servers):
                 system_prompt += (
@@ -208,12 +209,17 @@ class ClaudeManager:
                     " what your available tools provide. If asked about capabilities"
                     " you do not have, say you cannot help with that."
                 )
+            allowed_tools: list[str] = []
+            if use_web_search:
+                allowed_tools.extend(["WebSearch", "WebFetch"])
+
             client = ClaudeSDKClient(
                 options=ClaudeAgentOptions(
                     model=model or self._config.claude_model,
                     system_prompt=system_prompt,
                     permission_mode="bypassPermissions",
                     mcp_servers=mcp_servers,
+                    allowed_tools=allowed_tools,
                     disallowed_tools=disallowed_tools or [],
                 )
             )

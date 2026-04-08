@@ -163,18 +163,8 @@ class TestBuildMcpServersStocks:
 
 
 class TestBuildMcpServersWebSearch:
-    @patch.dict("os.environ", {"BRAVE_API_KEY": "test-key"}, clear=False)
-    def test_web_search_enabled(self):
-        servers = build_mcp_servers()
-        assert "web_search" in servers
-        assert servers["web_search"]["type"] == "stdio"
-        assert servers["web_search"]["command"] == "npx"
-        assert servers["web_search"]["env"]["BRAVE_API_KEY"] == "test-key"
-
-    @patch.dict("os.environ", {}, clear=False)
-    def test_web_search_disabled_no_key(self):
-        import os
-        os.environ.pop("BRAVE_API_KEY", None)
+    def test_web_search_not_an_mcp_server(self):
+        """web_search is a built-in Claude tool, not an MCP server."""
         servers = build_mcp_servers()
         assert "web_search" not in servers
 
