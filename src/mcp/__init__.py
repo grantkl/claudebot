@@ -11,11 +11,11 @@ if TYPE_CHECKING:
 
 
 def _resolve_playwright_path() -> bool:
-    """Pre-install / verify the Playwright MCP package is available."""
+    """Verify the Playwright MCP CLI is installed globally."""
     try:
         result = _subprocess.run(
-            ["npx", "--yes", "@playwright/mcp@latest", "--help"],
-            capture_output=True, text=True, timeout=30,
+            ["playwright-mcp", "--help"],
+            capture_output=True, text=True, timeout=10,
         )
         return result.returncode == 0
     except (FileNotFoundError, _subprocess.TimeoutExpired):
@@ -117,8 +117,8 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
         if _resolve_playwright_path():
             servers["playwright"] = {
                 "type": "stdio",
-                "command": "npx",
-                "args": ["--yes", "@playwright/mcp@latest", "--headless", "--browser", "chromium", "--output-dir", "/tmp/.playwright-mcp"],
+                "command": "playwright-mcp",
+                "args": ["--headless", "--browser", "chromium", "--output-dir", "/tmp/.playwright-mcp"],
             }
 
     shopping_list_enabled = os.environ.get("SHOPPING_LIST_ENABLED", "").lower() in ("1", "true", "yes")
