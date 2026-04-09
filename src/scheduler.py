@@ -205,7 +205,10 @@ class TaskScheduler:
 
         prompt = (
             f"{task.prompt}\n\n"
-            f"If there is nothing meaningful to report, respond with exactly: {NOTHING_TO_REPORT}"
+            f"If there is nothing meaningful to report, respond with exactly: {NOTHING_TO_REPORT}\n"
+            f"IMPORTANT: If any tool call fails or returns an error, that IS something meaningful"
+            f" to report. Report the error so it can be investigated. Only use {NOTHING_TO_REPORT}"
+            f" when tools succeed but return no noteworthy data."
         )
 
         # Strip "scheduler" from MCP server names to prevent recursion
@@ -241,6 +244,8 @@ class TaskScheduler:
             # Send DM if response is actionable
             if task.output == "dm" and NOTHING_TO_REPORT not in response:
                 await self._send_dm(response, task.name, user_id=task.created_by)
+            elif task.output == "dm":
+                logger.info("Task %s DM suppressed (NOTHING_TO_REPORT). Response: %s", task_id, response[:200])
 
             # Auto-disable one-time tasks after successful execution
             if task.run_once:
