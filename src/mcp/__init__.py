@@ -118,7 +118,7 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
             servers["playwright"] = {
                 "type": "stdio",
                 "command": "npx",
-                "args": ["--yes", "@playwright/mcp@latest", "--headless", "--browser", "chromium"],
+                "args": ["--yes", "@playwright/mcp@latest", "--headless", "--browser", "chromium", "--output-dir", "/tmp/.playwright-mcp"],
             }
 
     shopping_list_enabled = os.environ.get("SHOPPING_LIST_ENABLED", "").lower() in ("1", "true", "yes")
