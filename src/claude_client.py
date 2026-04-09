@@ -169,15 +169,22 @@ class ClaudeManager:
                     " (flight_watch_history), and remove watches (flight_watch_remove)."
                     " Price checks run automatically every 6 hours via the scheduler."
                 )
-            if mcp_server_names and "playwright" in mcp_server_names:
+            if os.environ.get("PLAYWRIGHT_ENABLED", "").lower() in ("1", "true", "yes"):
                 system_prompt += (
-                    "\n\nYou have access to browser automation via Playwright MCP tools."
-                    " You can navigate to URLs, click elements, fill forms, take screenshots,"
-                    " and interact with web pages. Use browser_snapshot (not screenshots) to"
-                    " read page content and find elements to interact with. Always use"
-                    " browser_close when done with a browsing session."
-                    " When taking screenshots, always specify a filename parameter."
+                    "\n\nYou have access to browser automation via the Playwright CLI"
+                    " (`playwright-cli`), available through the Bash tool."
+                    " Key commands: `playwright-cli open` (launch browser),"
+                    " `playwright-cli goto <url>` (navigate),"
+                    " `playwright-cli snapshot` (get page accessibility tree with element refs),"
+                    " `playwright-cli click <ref>` (click element),"
+                    " `playwright-cli type <text>` (type into focused element),"
+                    " `playwright-cli fill <ref> <text>` (fill a field),"
+                    " `playwright-cli screenshot [filename]` (capture screenshot),"
+                    " `playwright-cli close` (close browser)."
+                    " Always use `playwright-cli snapshot` to read page content and find"
+                    " element refs before interacting. Always close the browser when done."
                     " Screenshots you take will be automatically uploaded to the Slack thread."
+                    " Run `playwright-cli --help` for the full command list."
                 )
             if mcp_server_names and "seats_aero" in mcp_server_names:
                 system_prompt += (
