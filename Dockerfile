@@ -18,8 +18,8 @@ RUN npm install -g @privilegemendes/amadeus-mcp-server && \
     /usr/lib/node_modules/@privilegemendes/amadeus-mcp-server/dist/index.js
 RUN npm install -g @modelcontextprotocol/server-brave-search
 
-# Install Playwright MCP globally and browser dependencies for headless Chromium
-RUN npm install -g @playwright/mcp && \
+# Install Playwright CLI and browser dependencies for headless Chromium
+RUN npm install -g @playwright/cli@latest && \
     npx --yes playwright install --with-deps chromium
 
 # Install uv

@@ -10,17 +10,6 @@ if TYPE_CHECKING:
     from claude_agent_sdk import McpServerConfig
 
 
-def _resolve_playwright_path() -> bool:
-    """Verify the Playwright MCP CLI is installed globally."""
-    try:
-        result = _subprocess.run(
-            ["playwright-mcp", "--help"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return result.returncode == 0
-    except (FileNotFoundError, _subprocess.TimeoutExpired):
-        return False
-
 
 def _resolve_amadeus_path() -> str | None:
     """Resolve the path to the amadeus MCP server's stdio entry point."""
@@ -112,14 +101,6 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
             name="seats_aero", version="1.0.0", tools=SEATS_AERO_TOOLS
         )
 
-    playwright_enabled = os.environ.get("PLAYWRIGHT_ENABLED", "").lower() in ("1", "true", "yes")
-    if playwright_enabled:
-        if _resolve_playwright_path():
-            servers["playwright"] = {
-                "type": "stdio",
-                "command": "playwright-mcp",
-                "args": ["--headless", "--browser", "chromium", "--output-dir", "/tmp/.playwright-mcp"],
-            }
 
     shopping_list_enabled = os.environ.get("SHOPPING_LIST_ENABLED", "").lower() in ("1", "true", "yes")
     if shopping_list_enabled:

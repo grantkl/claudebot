@@ -79,11 +79,6 @@ _SERVER_KEYWORD_RULES: list[tuple[set[str], re.Pattern[str]]] = [
         r"\bsearch\b|\blook up\b|\bgoogle\b|\bnews\b|\blatest\b",
         re.IGNORECASE,
     )),
-    ({"playwright"}, re.compile(
-        r"\bbrowse\b|\bwebsite\b|\bscreenshot\b|\bweb ?page\b"
-        r"|\bnavigate\b|\bplaywright\b",
-        re.IGNORECASE,
-    )),
     ({"shopping_list"}, re.compile(
         r"\bgrocery\b|\bshopping list\b|\brecipe\b|\bingredients?\b|\bcostco\b",
         re.IGNORECASE,
@@ -142,9 +137,9 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         # Determine the full set of servers this user is *allowed* to use
         # (authorization gate — unchanged from before).
         if superuser:
-            mcp_server_names: set[str] = {"sonos", "homekit", "gmail", "calendar", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "playwright", "stocks", "web_search", "shopping_list"}
+            mcp_server_names: set[str] = {"sonos", "homekit", "gmail", "calendar", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "stocks", "web_search", "shopping_list"}
         elif authorized:
-            mcp_server_names = {"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}
+            mcp_server_names = {"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list"}
         else:
             mcp_server_names = {"stocks", "web_search"}
 
