@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -523,3 +523,358 @@ class TestTaskOwnership:
         scheduler = _make_scheduler(tmp_path, tasks=[task_data])
         result = scheduler.get_task("test_task")
         assert result["created_by"] == "U_OWNER"
+
+
+# ---------------------------------------------------------------------------
+# TestParseRateLimitReset
+# ---------------------------------------------------------------------------
+class TestParseRateLimitReset:
+    def test_parses_5am_utc(self):
+        result = TaskScheduler._parse_rate_limit_reset(
+            "You've hit your limit · resets 5am (UTC)"
+        )
+        assert result is not None
+        assert result.tzinfo == timezone.utc
+        assert result.hour == 5
+        assert result.minute == 0
+
+    def test_parses_11pm_utc(self):
+        result = TaskScheduler._parse_rate_limit_reset(
+            "You've hit your limit · resets 11pm (UTC)"
+        )
+        assert result is not None
+        assert result.hour == 23
+
+    def test_parses_12am_utc(self):
+        result = TaskScheduler._parse_rate_limit_reset(
+            "You've hit your limit · resets 12am (UTC)"
+        )
+        assert result is not None
+        assert result.hour == 0
+
+    def test_parses_12pm_utc(self):
+        result = TaskScheduler._parse_rate_limit_reset(
+            "You've hit your limit · resets 12pm (UTC)"
+        )
+        assert result is not None
+        assert result.hour == 12
+
+    def test_returns_none_for_unrelated_error(self):
+        result = TaskScheduler._parse_rate_limit_reset("Connection timeout")
+        assert result is None
+
+    def test_returns_none_for_partial_match(self):
+        result = TaskScheduler._parse_rate_limit_reset(
+            "You've hit your limit but no reset time"
+        )
+        assert result is None
+
+    def test_reset_time_in_past_rolls_to_tomorrow(self):
+        # Force "now" to be after the reset hour so the result should be tomorrow
+        now = datetime.now(timezone.utc)
+        # Use 1 hour in the past
+        past_hour = (now.hour - 1) % 24
+        ampm = "am" if past_hour < 12 else "pm"
+        display_hour = past_hour if past_hour <= 12 else past_hour - 12
+        if display_hour == 0:
+            display_hour = 12
+        msg = f"resets {display_hour}{ampm} (UTC)"
+        result = TaskScheduler._parse_rate_limit_reset(msg)
+        assert result is not None
+        assert result > now
+
+    def test_reset_time_in_future_stays_today(self):
+        now = datetime.now(timezone.utc)
+        # Use 2 hours in the future
+        future_hour = (now.hour + 2) % 24
+        ampm = "am" if future_hour < 12 else "pm"
+        display_hour = future_hour if future_hour <= 12 else future_hour - 12
+        if display_hour == 0:
+            display_hour = 12
+        msg = f"resets {display_hour}{ampm} (UTC)"
+        result = TaskScheduler._parse_rate_limit_reset(msg)
+        assert result is not None
+        # Should be today (within ~24 hours)
+        assert result - now < timedelta(hours=24)
+
+
+# ---------------------------------------------------------------------------
+# TestRateLimitPauseResume
+# ---------------------------------------------------------------------------
+class TestRateLimitPauseResume:
+    async def test_rate_limit_pauses_all_active_tasks(self, tmp_path):
+        task1 = {**_sample_task_data(), "id": "task1", "name": "Task 1"}
+        task2 = {**_sample_task_data(), "id": "task2", "name": "Task 2"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task1, task2])
+
+        reset_utc = datetime.now(timezone.utc) + timedelta(hours=2)
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await scheduler._pause_all_for_rate_limit(reset_utc)
+
+        assert scheduler._state["task1"].paused is True
+        assert scheduler._state["task1"].rate_limit_paused is True
+        assert scheduler._state["task2"].paused is True
+        assert scheduler._state["task2"].rate_limit_paused is True
+
+        # Clean up the resume task
+        if scheduler._rate_limit_resume_task:
+            scheduler._rate_limit_resume_task.cancel()
+
+    async def test_rate_limit_skips_manually_paused_tasks(self, tmp_path):
+        task1 = {**_sample_task_data(), "id": "task1", "name": "Task 1"}
+        task2 = {**_sample_task_data(), "id": "task2", "name": "Task 2"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task1, task2])
+
+        # Manually pause task1
+        scheduler.pause_task("task1")
+
+        reset_utc = datetime.now(timezone.utc) + timedelta(hours=2)
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await scheduler._pause_all_for_rate_limit(reset_utc)
+
+        # task1 was already paused — should NOT be marked rate_limit_paused
+        assert scheduler._state["task1"].paused is True
+        assert scheduler._state["task1"].rate_limit_paused is False
+        # task2 should be rate-limit paused
+        assert scheduler._state["task2"].paused is True
+        assert scheduler._state["task2"].rate_limit_paused is True
+
+        if scheduler._rate_limit_resume_task:
+            scheduler._rate_limit_resume_task.cancel()
+
+    async def test_rate_limit_skips_disabled_tasks(self, tmp_path):
+        task1 = {**_sample_task_data(), "id": "task1", "name": "Task 1", "enabled": False}
+        task2 = {**_sample_task_data(), "id": "task2", "name": "Task 2"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task1, task2])
+
+        reset_utc = datetime.now(timezone.utc) + timedelta(hours=2)
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await scheduler._pause_all_for_rate_limit(reset_utc)
+
+        # task1 is disabled — should not be touched
+        assert scheduler._state.get("task1", TaskState()).rate_limit_paused is False
+        # task2 should be paused
+        assert scheduler._state["task2"].rate_limit_paused is True
+
+        if scheduler._rate_limit_resume_task:
+            scheduler._rate_limit_resume_task.cancel()
+
+    async def test_rate_limit_sends_dm_alert(self, tmp_path):
+        tasks = [_sample_task_data()]
+        scheduler = _make_scheduler(tmp_path, tasks=tasks)
+
+        reset_utc = datetime.now(timezone.utc) + timedelta(hours=2)
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            mock_client = AsyncMock()
+            MockClient.return_value = mock_client
+            await scheduler._pause_all_for_rate_limit(reset_utc)
+
+        mock_client.chat_postMessage.assert_called_once()
+        text = mock_client.chat_postMessage.call_args.kwargs["text"]
+        assert "rate limit" in text.lower()
+
+        if scheduler._rate_limit_resume_task:
+            scheduler._rate_limit_resume_task.cancel()
+
+    async def test_rate_limit_schedules_resume_task(self, tmp_path):
+        tasks = [_sample_task_data()]
+        scheduler = _make_scheduler(tmp_path, tasks=tasks)
+
+        reset_utc = datetime.now(timezone.utc) + timedelta(hours=2)
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await scheduler._pause_all_for_rate_limit(reset_utc)
+
+        assert scheduler._rate_limit_resume_task is not None
+        assert not scheduler._rate_limit_resume_task.done()
+
+        scheduler._rate_limit_resume_task.cancel()
+
+    async def test_duplicate_pause_is_idempotent(self, tmp_path):
+        tasks = [_sample_task_data()]
+        scheduler = _make_scheduler(tmp_path, tasks=tasks)
+
+        reset_utc = datetime.now(timezone.utc) + timedelta(hours=2)
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await scheduler._pause_all_for_rate_limit(reset_utc)
+            first_task = scheduler._rate_limit_resume_task
+            # Second call should be a no-op
+            await scheduler._pause_all_for_rate_limit(reset_utc)
+            assert scheduler._rate_limit_resume_task is first_task
+
+        scheduler._rate_limit_resume_task.cancel()
+
+    async def test_resume_after_clears_rate_limit_paused(self, tmp_path):
+        task1 = {**_sample_task_data(), "id": "task1", "name": "Task 1"}
+        task2 = {**_sample_task_data(), "id": "task2", "name": "Task 2"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task1, task2])
+
+        # Manually set rate_limit_paused state
+        scheduler._state["task1"] = TaskState(paused=True, rate_limit_paused=True)
+        scheduler._state["task2"] = TaskState(paused=True, rate_limit_paused=True)
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            # Use 0 sleep to resume immediately
+            await scheduler._rate_limit_resume_after(0)
+
+        assert scheduler._state["task1"].paused is False
+        assert scheduler._state["task1"].rate_limit_paused is False
+        assert scheduler._state["task1"].consecutive_failures == 0
+        assert scheduler._state["task2"].paused is False
+        assert scheduler._state["task2"].rate_limit_paused is False
+
+    async def test_resume_does_not_unset_manual_pause(self, tmp_path):
+        task1 = {**_sample_task_data(), "id": "task1", "name": "Task 1"}
+        task2 = {**_sample_task_data(), "id": "task2", "name": "Task 2"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task1, task2])
+
+        # task1 manually paused, task2 rate-limit paused
+        scheduler._state["task1"] = TaskState(paused=True, rate_limit_paused=False)
+        scheduler._state["task2"] = TaskState(paused=True, rate_limit_paused=True)
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await scheduler._rate_limit_resume_after(0)
+
+        # task1 should still be paused (manual)
+        assert scheduler._state["task1"].paused is True
+        # task2 should be resumed
+        assert scheduler._state["task2"].paused is False
+
+    async def test_resume_sends_dm(self, tmp_path):
+        tasks = [_sample_task_data()]
+        scheduler = _make_scheduler(tmp_path, tasks=tasks)
+        scheduler._state["test_task"] = TaskState(paused=True, rate_limit_paused=True)
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            mock_client = AsyncMock()
+            MockClient.return_value = mock_client
+            await scheduler._rate_limit_resume_after(0)
+
+        mock_client.chat_postMessage.assert_called_once()
+        text = mock_client.chat_postMessage.call_args.kwargs["text"]
+        assert "resumed" in text.lower()
+
+
+# ---------------------------------------------------------------------------
+# TestRateLimitInExecuteTask
+# ---------------------------------------------------------------------------
+class TestRateLimitInExecuteTask:
+    async def test_rate_limit_error_pauses_all_tasks(self, tmp_path):
+        task1 = {**_sample_task_data(), "id": "task1", "name": "Task 1"}
+        task2 = {**_sample_task_data(), "id": "task2", "name": "Task 2"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task1, task2])
+        scheduler._claude_manager.send_message = AsyncMock(
+            side_effect=RuntimeError("You've hit your limit · resets 5am (UTC)")
+        )
+        scheduler._claude_manager.remove_session = AsyncMock()
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await scheduler._execute_task(scheduler._tasks["task1"])
+
+        # Both tasks should be rate-limit paused
+        assert scheduler._state["task1"].rate_limit_paused is True
+        assert scheduler._state["task2"].rate_limit_paused is True
+
+        if scheduler._rate_limit_resume_task:
+            scheduler._rate_limit_resume_task.cancel()
+
+    async def test_rate_limit_error_does_not_increment_failures(self, tmp_path):
+        tasks = [_sample_task_data()]
+        scheduler = _make_scheduler(tmp_path, tasks=tasks)
+        scheduler._claude_manager.send_message = AsyncMock(
+            side_effect=RuntimeError("You've hit your limit · resets 5am (UTC)")
+        )
+        scheduler._claude_manager.remove_session = AsyncMock()
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await scheduler._execute_task(scheduler._tasks["test_task"])
+
+        state = scheduler._state["test_task"]
+        assert state.consecutive_failures == 0
+
+        if scheduler._rate_limit_resume_task:
+            scheduler._rate_limit_resume_task.cancel()
+
+    async def test_unparseable_rate_limit_uses_fallback(self, tmp_path):
+        tasks = [_sample_task_data()]
+        scheduler = _make_scheduler(tmp_path, tasks=tasks)
+        scheduler._claude_manager.send_message = AsyncMock(
+            side_effect=RuntimeError("You've hit your limit")
+        )
+        scheduler._claude_manager.remove_session = AsyncMock()
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await scheduler._execute_task(scheduler._tasks["test_task"])
+
+        # Should still be rate-limit paused (fallback 1-hour)
+        assert scheduler._state["test_task"].rate_limit_paused is True
+        assert scheduler._rate_limit_resume_task is not None
+
+        scheduler._rate_limit_resume_task.cancel()
+
+    async def test_non_rate_limit_error_increments_failures(self, tmp_path):
+        tasks = [_sample_task_data()]
+        scheduler = _make_scheduler(tmp_path, tasks=tasks)
+        scheduler._claude_manager.send_message = AsyncMock(
+            side_effect=RuntimeError("Connection refused")
+        )
+        scheduler._claude_manager.remove_session = AsyncMock()
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient"):
+            await scheduler._execute_task(scheduler._tasks["test_task"])
+
+        state = scheduler._state["test_task"]
+        assert state.consecutive_failures == 1
+        assert state.rate_limit_paused is False
+
+
+# ---------------------------------------------------------------------------
+# TestRateLimitStatePersistence
+# ---------------------------------------------------------------------------
+class TestRateLimitStatePersistence:
+    def test_rate_limit_paused_persisted_in_state(self, tmp_path):
+        tasks = [_sample_task_data()]
+        scheduler = _make_scheduler(tmp_path, tasks=tasks)
+        scheduler._state["test_task"] = TaskState(
+            paused=True, rate_limit_paused=True
+        )
+        scheduler._save_state()
+
+        # Load state in a new scheduler
+        config = _make_config()
+        tasks_file = _make_tasks_yaml(tmp_path, tasks)
+        state_file = str(tmp_path / "state.json")
+        scheduler2 = TaskScheduler(
+            config, AsyncMock(), "xoxb-test", tasks_file, state_file
+        )
+
+        state = scheduler2._state["test_task"]
+        assert state.paused is True
+        assert state.rate_limit_paused is True
+
+    def test_list_tasks_includes_rate_limit_paused(self, tmp_path):
+        tasks = [_sample_task_data()]
+        scheduler = _make_scheduler(tmp_path, tasks=tasks)
+        scheduler._state["test_task"] = TaskState(
+            paused=True, rate_limit_paused=True
+        )
+        result = scheduler.list_tasks()
+        assert result[0]["rate_limit_paused"] is True
+
+    def test_get_task_includes_rate_limit_paused(self, tmp_path):
+        tasks = [_sample_task_data()]
+        scheduler = _make_scheduler(tmp_path, tasks=tasks)
+        scheduler._state["test_task"] = TaskState(
+            paused=True, rate_limit_paused=True
+        )
+        result = scheduler.get_task("test_task")
+        assert result["rate_limit_paused"] is True
