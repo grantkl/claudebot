@@ -44,6 +44,10 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
 
         servers["homekit"] = create_sdk_mcp_server(name="homekit", version="1.0.0", tools=HOMEKIT_TOOLS)
 
+    memory_url = os.environ.get("MEMORY_MCP_URL")
+    if memory_url:
+        servers["memory"] = {"type": "http", "url": memory_url}
+
     scheduler_enabled = os.environ.get("SCHEDULER_ENABLED", "").lower() in ("1", "true", "yes")
     if scheduler_enabled:
         from .scheduler_server import SCHEDULER_TOOLS
