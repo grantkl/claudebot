@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
@@ -48,6 +50,7 @@ class TaskState:
     last_run_time: str | None = None  # ISO 8601
     consecutive_failures: int = 0
     paused: bool = False
+    rate_limit_paused: bool = False  # True if paused by rate limiter
 
 
 class TaskScheduler:
@@ -71,6 +74,7 @@ class TaskScheduler:
         self._in_flight: set[asyncio.Task[None]] = set()
         self._executing_ids: set[str] = set()
         self._tz = ZoneInfo(config.scheduler_timezone)
+        self._rate_limit_resume_task: asyncio.Task[None] | None = None
 
         self._load_tasks()
         self._load_state()
@@ -134,6 +138,7 @@ class TaskScheduler:
                     last_run_time=state_data.get("last_run_time"),
                     consecutive_failures=state_data.get("consecutive_failures", 0),
                     paused=state_data.get("paused", False),
+                    rate_limit_paused=state_data.get("rate_limit_paused", False),
                 )
         except (json.JSONDecodeError, OSError):
             logger.exception("Failed to load scheduler state from %s", self._state_file)
@@ -148,6 +153,7 @@ class TaskScheduler:
                 "last_run_time": state.last_run_time,
                 "consecutive_failures": state.consecutive_failures,
                 "paused": state.paused,
+                "rate_limit_paused": state.rate_limit_paused,
             }
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
@@ -159,6 +165,12 @@ class TaskScheduler:
 
     async def stop(self) -> None:
         """Stop the scheduler and wait for in-flight tasks."""
+        if self._rate_limit_resume_task is not None:
+            self._rate_limit_resume_task.cancel()
+            try:
+                await self._rate_limit_resume_task
+            except asyncio.CancelledError:
+                pass
         if self._loop_task is not None:
             self._loop_task.cancel()
             try:
@@ -262,6 +274,18 @@ class TaskScheduler:
                 "Task %s (%s) failed [%s]: %s",
                 task.name, task_id, classified.category, classified.log_message,
             )
+
+            # Check for API rate limit error
+            error_msg = str(exc)
+            reset_time = self._parse_rate_limit_reset(error_msg)
+            if reset_time is not None or "hit your limit" in error_msg.lower():
+                if reset_time is None:
+                    # Could not parse reset time — fall back to 1-hour pause
+                    reset_time = datetime.now(timezone.utc) + timedelta(hours=1)
+                await self._pause_all_for_rate_limit(reset_time)
+                # Don't count this as a task-specific failure
+                return
+
             state.consecutive_failures += 1
             if state.consecutive_failures >= 5:
                 state.paused = True
@@ -294,12 +318,134 @@ class TaskScheduler:
             except Exception:
                 logger.exception("Failed to send DM to %s", recipient)
 
+    # --- Rate limit handling ---
+
+    @staticmethod
+    def _parse_rate_limit_reset(error_message: str) -> datetime | None:
+        """Parse reset time from a rate limit error message.
+
+        Matches patterns like "resets 5am (UTC)", "resets 11pm (UTC)".
+        Returns a timezone-aware UTC datetime for the next occurrence of that time.
+        """
+        match = re.search(
+            r"resets\s+(\d{1,2})(am|pm)\s*\(UTC\)", error_message, re.IGNORECASE
+        )
+        if not match:
+            return None
+
+        hour = int(match.group(1))
+        ampm = match.group(2).lower()
+
+        if ampm == "pm" and hour != 12:
+            hour += 12
+        elif ampm == "am" and hour == 12:
+            hour = 0
+
+        now_utc = datetime.now(timezone.utc)
+        reset = now_utc.replace(hour=hour, minute=0, second=0, microsecond=0)
+
+        # If the reset time is in the past, it means tomorrow
+        if reset <= now_utc:
+            reset += timedelta(days=1)
+
+        return reset
+
+    async def _pause_all_for_rate_limit(self, reset_utc: datetime) -> None:
+        """Pause all active tasks due to rate limiting and schedule auto-resume."""
+        # Don't create duplicate resume tasks
+        if (
+            self._rate_limit_resume_task is not None
+            and not self._rate_limit_resume_task.done()
+        ):
+            logger.info("Rate limit resume already scheduled, skipping duplicate")
+            return
+
+        # Pause all enabled, non-paused tasks and mark them as rate_limit_paused
+        paused_names = []
+        for task_id, task in self._tasks.items():
+            if not task.enabled:
+                continue
+            state = self._state.setdefault(task_id, TaskState())
+            if state.paused:
+                continue  # already paused (manually) — don't touch
+            state.paused = True
+            state.rate_limit_paused = True
+            paused_names.append(task.name)
+
+        self._save_state()
+
+        # Format reset time for display in configured timezone
+        reset_local = reset_utc.astimezone(self._tz)
+        reset_display = reset_local.strftime("%-I:%M %p %Z")
+
+        # Send DM to all superusers
+        if paused_names:
+            msg = (
+                f":warning: *Rate limit hit* — all {len(paused_names)} active scheduled "
+                f"tasks have been paused.\n"
+                f"Auto-resume scheduled for *{reset_display}* (+ 60s buffer).\n"
+                f"Paused tasks: {', '.join(paused_names)}"
+            )
+            await self._send_dm(msg, "Rate Limit Alert")
+
+        # Schedule the resume
+        buffer_seconds = 60
+        now_utc = datetime.now(timezone.utc)
+        sleep_seconds = (reset_utc - now_utc).total_seconds() + buffer_seconds
+        sleep_seconds = max(sleep_seconds, 60)  # minimum 60s sleep
+
+        logger.warning(
+            "Rate limit detected. Paused %d tasks. Resuming in %.0f seconds at %s",
+            len(paused_names),
+            sleep_seconds,
+            reset_display,
+        )
+
+        self._rate_limit_resume_task = asyncio.create_task(
+            self._rate_limit_resume_after(sleep_seconds)
+        )
+
+    async def _rate_limit_resume_after(self, sleep_seconds: float) -> None:
+        """Sleep until reset time, then resume all rate-limit-paused tasks."""
+        try:
+            await asyncio.sleep(sleep_seconds)
+
+            resumed_names = []
+            for task_id, task in self._tasks.items():
+                state = self._state.get(task_id)
+                if state is None:
+                    continue
+                if state.rate_limit_paused:
+                    state.paused = False
+                    state.rate_limit_paused = False
+                    state.consecutive_failures = 0
+                    resumed_names.append(task.name)
+
+            self._save_state()
+
+            if resumed_names:
+                msg = (
+                    f":white_check_mark: *Rate limit lifted* — {len(resumed_names)} "
+                    f"tasks have been resumed.\n"
+                    f"Resumed tasks: {', '.join(resumed_names)}"
+                )
+                await self._send_dm(msg, "Rate Limit Alert")
+
+            logger.info(
+                "Rate limit resume complete. Resumed %d tasks.", len(resumed_names)
+            )
+        except asyncio.CancelledError:
+            logger.info("Rate limit resume task was cancelled")
+            raise
+        except Exception:
+            logger.exception("Error during rate limit resume")
+        finally:
+            self._rate_limit_resume_task = None
+
     def _compute_next_run(
         self, task: TaskDefinition, state: TaskState
     ) -> float | None:
         """Compute the next run time for a task."""
-        from datetime import datetime
-
         if task.cron:
             if state.last_run_time:
                 base = datetime.fromisoformat(state.last_run_time)
@@ -325,8 +471,6 @@ class TaskScheduler:
 
     def list_tasks(self) -> list[dict[str, Any]]:
         """List all tasks with their status and next run time."""
-        from datetime import datetime
-
         result = []
         for task_id, task in self._tasks.items():
             state = self._state.get(task_id, TaskState())
@@ -341,6 +485,7 @@ class TaskScheduler:
                 "name": task.name,
                 "enabled": task.enabled,
                 "paused": state.paused,
+                "rate_limit_paused": state.rate_limit_paused,
                 "schedule": task.cron or f"every {task.interval_seconds}s",
                 "next_run": next_run_str,
                 "last_run": state.last_run_time,
@@ -372,6 +517,7 @@ class TaskScheduler:
             "run_once": task.run_once,
             "created_by": task.created_by,
             "paused": state.paused,
+            "rate_limit_paused": state.rate_limit_paused,
             "last_run": state.last_run_time,
             "consecutive_failures": state.consecutive_failures,
         }

@@ -110,7 +110,15 @@ tasks:
 
 When `WEBHOOK_ENABLED=true`, an optional HTTP webhook server starts on `WEBHOOK_PORT` (default `8081`) for external signal ingestion. External systems (e.g., monitoring alerts, CI/CD pipelines, IoT triggers) can send signals via `POST /webhook/signal` with Bearer token authentication (`WEBHOOK_SECRET`). The request body specifies a prompt and target Slack user IDs. The server reuses the existing tiered access model to determine which Claude model and MCP servers are available based on the target user's tier, then processes the prompt and DMs results to the specified users.
 
+## Git Workflow
+
+- The default branch is `master`. Always branch from and rebase onto `origin/master` before creating a PR: `git fetch origin master && git checkout -b feat/my-feature origin/master`
+- If a PR has merge conflicts, rebase onto `origin/master` and force-push the branch.
+
 ## Testing Conventions
+
+- **All code changes must include tests.** When adding new functionality, add corresponding unit tests in `tests/`. When modifying existing behavior, update or extend the relevant tests.
+- Run `pytest` to verify all tests pass before committing.
 
 External modules (`slack_bolt`, `claude_agent_sdk`) must be mock-injected into `sys.modules` **before** importing source modules, due to import-time initialization. See `test_slack_app.py` and `test_claude_client.py` for the pattern:
 
