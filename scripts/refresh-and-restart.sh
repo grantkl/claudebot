@@ -30,8 +30,9 @@ with open('$CONTAINER_DIR/claude.json', 'w') as f:
     json.dump(minimal, f, indent=2)
 "
 
-# Rebuild and restart the container (--no-cache on COPY layers to pick up source changes)
+# Pull latest code and rebuild the container
 cd "$PROJECT_DIR"
+git pull origin master
 docker compose build --no-cache claudebot
 docker compose up -d claudebot
 
