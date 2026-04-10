@@ -6,12 +6,30 @@ services:
       - ./proxy/default.conf.template:/etc/nginx/templates/default.conf.template:ro
     restart: unless-stopped
 
+  memory:
+    build:
+      context: https://github.com/doobidoo/mcp-memory-service.git
+      dockerfile: tools/docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      - MCP_STREAMABLE_HTTP_MODE=1
+      - MCP_HTTP_HOST=0.0.0.0
+      - MCP_HTTP_PORT=8765
+      - MCP_MEMORY_STORAGE_BACKEND=sqlite_vec
+      - MCP_MEMORY_SQLITE_PATH=/data/memories.db
+      - MCP_ALLOW_ANONYMOUS_ACCESS=true
+    volumes:
+      - ./data/memory:/data:rw
+    expose:
+      - "8765"
+
   claudebot:
     build: .
     env_file: .env
     restart: unless-stopped
     depends_on:
       - auth-proxy
+      - memory
     ports:
       - "${WEBHOOK_PORT:-8081}:8081"
     volumes:
@@ -24,6 +42,7 @@ services:
       - ENABLE_MCP=true
       - SONOS_SPEAKER_IPS=${SONOS_SPEAKER_IPS}
       - HOMECLAW_MCP_URL=http://host.docker.internal:9876
+      - MEMORY_MCP_URL=http://memory:8765
       - CLAUDE_CODE_OAUTH_TOKEN=dummy-oauth-proxy-placeholder
       - ANTHROPIC_BASE_URL=http://auth-proxy:8080
       - SUPERUSER_IDS=${SUPERUSER_IDS}

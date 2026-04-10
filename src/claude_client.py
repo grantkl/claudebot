@@ -206,6 +206,22 @@ class ClaudeManager:
                     " then options_chain (specific strikes). Be direct and"
                     " concise — the user wants actionable analysis, not disclaimers."
                 )
+            if mcp_server_names and "memory" in mcp_server_names:
+                system_prompt += (
+                    "\n\nYou have access to persistent memory via MCP tools."
+                    " Use store_memory to save important facts, user preferences,"
+                    " decisions, and context. Use retrieve_memory to semantically"
+                    " search past memories before answering questions. Use search_by_tag"
+                    " to find memories by category. Proactively check memory at the"
+                    " start of conversations for relevant context about the user."
+                )
+                if user_id:
+                    system_prompt += (
+                        f"\n\nMEMORY SCOPING: All memories are per-user. When storing memories,"
+                        f" ALWAYS include the tag '{user_id}' so memories are scoped to this user."
+                        f" When retrieving or searching memories, ALWAYS filter by the tag"
+                        f" '{user_id}' to only recall this user's memories."
+                    )
             use_web_search = bool(mcp_server_names and "web_search" in mcp_server_names)
             if use_web_search:
                 system_prompt += (

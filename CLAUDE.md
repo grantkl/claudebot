@@ -114,6 +114,7 @@ When `WEBHOOK_ENABLED=true`, an optional HTTP webhook server starts on `WEBHOOK_
 
 - The default branch is `master`. Always branch from and rebase onto `origin/master` before creating a PR: `git fetch origin master && git checkout -b feat/my-feature origin/master`
 - If a PR has merge conflicts, rebase onto `origin/master` and force-push the branch.
+- **Always create a PR for code changes.** Local-only changes are worthless — the bot runs from the repo via Docker, so changes must be merged to take effect. After committing, push the branch and create a PR with `gh pr create`.
 
 ## Testing Conventions
 

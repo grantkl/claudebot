@@ -137,9 +137,9 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         # Determine the full set of servers this user is *allowed* to use
         # (authorization gate — unchanged from before).
         if superuser:
-            mcp_server_names: set[str] = {"sonos", "homekit", "gmail", "calendar", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "stocks", "web_search", "shopping_list"}
+            mcp_server_names: set[str] = {"sonos", "homekit", "gmail", "calendar", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "stocks", "web_search", "shopping_list", "memory"}
         elif authorized:
-            mcp_server_names = {"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list"}
+            mcp_server_names = {"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list", "memory"}
         else:
             mcp_server_names = {"stocks", "web_search"}
 
