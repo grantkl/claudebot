@@ -415,6 +415,138 @@ async def gmail_check_alerted(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 6. gmail_list_labels
+# ---------------------------------------------------------------------------
+@tool(
+    "gmail_list_labels",
+    "List all Gmail labels. Returns a JSON list with id, name, and type for each label. Use this to find the label ID for a given label name before applying it to a message.",
+    {
+        "type": "object",
+        "properties": {},
+    },
+)
+async def gmail_list_labels(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        service = _get_gmail_service()
+        response = service.users().labels().list(userId="me").execute()
+        labels = response.get("labels", [])
+        results = [
+            {
+                "id": label["id"],
+                "name": label["name"],
+                "type": label.get("type", "user"),
+            }
+            for label in labels
+        ]
+        return _text(json.dumps(results, indent=2))
+    except Exception as e:
+        classified = classify_error(e)
+        logger.exception("gmail_list_labels failed [%s]: %s", classified.category, classified.log_message)
+        return _error(f"Failed to list labels ({classified.category}): {classified.log_message}")
+
+
+# ---------------------------------------------------------------------------
+# 7. gmail_create_label
+# ---------------------------------------------------------------------------
+@tool(
+    "gmail_create_label",
+    "Create a new Gmail label. Returns the created label's id and name. Use gmail_list_labels first to check if the label already exists.",
+    {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "The name of the label to create (e.g., '2026 taxes').",
+            },
+        },
+        "required": ["name"],
+    },
+)
+async def gmail_create_label(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        service = _get_gmail_service()
+        label_name = args["name"]
+        label_body = {
+            "name": label_name,
+            "labelListVisibility": "labelShow",
+            "messageListVisibility": "show",
+        }
+        created = (
+            service.users()
+            .labels()
+            .create(userId="me", body=label_body)
+            .execute()
+        )
+        result = {"id": created["id"], "name": created["name"]}
+        return _text(json.dumps(result, indent=2))
+    except Exception as e:
+        classified = classify_error(e)
+        logger.exception("gmail_create_label failed [%s]: %s", classified.category, classified.log_message)
+        return _error(f"Failed to create label ({classified.category}): {classified.log_message}")
+
+
+# ---------------------------------------------------------------------------
+# 8. gmail_modify_labels
+# ---------------------------------------------------------------------------
+@tool(
+    "gmail_modify_labels",
+    "Add or remove labels from a Gmail email. Use gmail_list_labels to find label IDs first.",
+    {
+        "type": "object",
+        "properties": {
+            "message_id": {
+                "type": "string",
+                "description": "The Gmail message ID.",
+            },
+            "add_label_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Label IDs to add to the message.",
+            },
+            "remove_label_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Label IDs to remove from the message.",
+            },
+        },
+        "required": ["message_id"],
+    },
+)
+async def gmail_modify_labels(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        service = _get_gmail_service()
+        message_id = args["message_id"]
+        add_ids = args.get("add_label_ids", [])
+        remove_ids = args.get("remove_label_ids", [])
+
+        if not add_ids and not remove_ids:
+            return _error("Must provide add_label_ids or remove_label_ids (or both).")
+
+        body: dict[str, Any] = {}
+        if add_ids:
+            body["addLabelIds"] = add_ids
+        if remove_ids:
+            body["removeLabelIds"] = remove_ids
+
+        service.users().messages().modify(
+            userId="me",
+            id=message_id,
+            body=body,
+        ).execute()
+
+        parts = []
+        if add_ids:
+            parts.append(f"added labels {add_ids}")
+        if remove_ids:
+            parts.append(f"removed labels {remove_ids}")
+        return _text(f"Message {message_id}: {', '.join(parts)}.")
+    except Exception as e:
+        classified = classify_error(e)
+        logger.exception("gmail_modify_labels failed [%s]: %s", classified.category, classified.log_message)
+        return _error(f"Failed to modify labels ({classified.category}): {classified.log_message}")
+
+
+# ---------------------------------------------------------------------------
 # Export all tools
 # ---------------------------------------------------------------------------
 GMAIL_TOOLS: list[SdkMcpTool] = [
@@ -423,4 +555,7 @@ GMAIL_TOOLS: list[SdkMcpTool] = [
     gmail_mark_as_read,
     gmail_star_email,
     gmail_check_alerted,
+    gmail_list_labels,
+    gmail_create_label,
+    gmail_modify_labels,
 ]
