@@ -15,6 +15,7 @@ sys.modules.setdefault("src.mcp.gmail_server", MagicMock())
 sys.modules.setdefault("src.mcp.flight_watch_server", MagicMock())
 sys.modules.setdefault("src.mcp.stocks_server", MagicMock())
 sys.modules.setdefault("src.mcp.calendar_server", MagicMock())
+sys.modules.setdefault("src.mcp.deploy_server", MagicMock())
 
 from src.mcp import _resolve_amadeus_path, build_mcp_servers  # noqa: E402
 
@@ -165,3 +166,25 @@ class TestBuildMcpServersCalendar:
         os.environ.pop("GMAIL_CREDENTIALS_FILE", None)
         servers = build_mcp_servers()
         assert "calendar" not in servers
+
+
+class TestBuildMcpServersDeploy:
+    @patch.dict("os.environ", {"DEPLOY_ENABLED": "true"}, clear=False)
+    def test_deploy_enabled(self):
+        """Deploy tools are loaded when DEPLOY_ENABLED=true."""
+        servers = build_mcp_servers()
+        assert "deploy" in servers
+
+    @patch.dict("os.environ", {"DEPLOY_ENABLED": "false"}, clear=False)
+    def test_deploy_disabled(self):
+        """Deploy tools are NOT loaded when DEPLOY_ENABLED=false."""
+        servers = build_mcp_servers()
+        assert "deploy" not in servers
+
+    @patch.dict("os.environ", {}, clear=False)
+    def test_deploy_not_set_in_env(self):
+        """Deploy tools are NOT loaded when DEPLOY_ENABLED is not set."""
+        import os
+        os.environ.pop("DEPLOY_ENABLED", None)
+        servers = build_mcp_servers()
+        assert "deploy" not in servers
