@@ -48,6 +48,9 @@ _list_emails = gmail_server.gmail_list_emails.handler
 _get_email = gmail_server.gmail_get_email.handler
 _mark_as_read = gmail_server.gmail_mark_as_read.handler
 _star_email = gmail_server.gmail_star_email.handler
+_list_labels = gmail_server.gmail_list_labels.handler
+_create_label = gmail_server.gmail_create_label.handler
+_modify_labels = gmail_server.gmail_modify_labels.handler
 
 
 def _parse_text(result: dict[str, Any]) -> str:
@@ -382,3 +385,165 @@ class TestGmailStarEmail:
         result = await _star_email({"message_id": "msg789"})
         assert _is_error(result)
         assert "Failed to star email" in _parse_text(result)
+
+
+# ---------------------------------------------------------------------------
+# gmail_list_labels
+# ---------------------------------------------------------------------------
+class TestGmailListLabels:
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_lists_labels(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+
+        service.users().labels().list().execute.return_value = {
+            "labels": [
+                {"id": "INBOX", "name": "INBOX", "type": "system"},
+                {"id": "Label_1", "name": "2026 taxes", "type": "user"},
+            ],
+        }
+
+        result = await _list_labels({})
+        data = json.loads(_parse_text(result))
+
+        assert not _is_error(result)
+        assert len(data) == 2
+        assert data[0]["id"] == "INBOX"
+        assert data[1]["name"] == "2026 taxes"
+        assert data[1]["type"] == "user"
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_empty_labels(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+
+        service.users().labels().list().execute.return_value = {"labels": []}
+
+        result = await _list_labels({})
+        data = json.loads(_parse_text(result))
+
+        assert not _is_error(result)
+        assert data == []
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_error_handling(self, mock_get_svc: MagicMock) -> None:
+        mock_get_svc.side_effect = Exception("Auth failed")
+
+        result = await _list_labels({})
+        assert _is_error(result)
+        assert "Failed to list labels" in _parse_text(result)
+
+
+# ---------------------------------------------------------------------------
+# gmail_create_label
+# ---------------------------------------------------------------------------
+class TestGmailCreateLabel:
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_creates_label(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+
+        service.users().labels().create().execute.return_value = {
+            "id": "Label_42",
+            "name": "2026 taxes",
+        }
+
+        result = await _create_label({"name": "2026 taxes"})
+        data = json.loads(_parse_text(result))
+
+        assert not _is_error(result)
+        assert data["id"] == "Label_42"
+        assert data["name"] == "2026 taxes"
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_error_handling(self, mock_get_svc: MagicMock) -> None:
+        mock_get_svc.side_effect = Exception("Label already exists")
+
+        result = await _create_label({"name": "duplicate"})
+        assert _is_error(result)
+        assert "Failed to create label" in _parse_text(result)
+
+
+# ---------------------------------------------------------------------------
+# gmail_modify_labels
+# ---------------------------------------------------------------------------
+class TestGmailModifyLabels:
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_adds_labels(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+        service.users().messages().modify().execute.return_value = {}
+
+        result = await _modify_labels({
+            "message_id": "msg123",
+            "add_label_ids": ["Label_42"],
+        })
+
+        assert not _is_error(result)
+        assert "added labels" in _parse_text(result)
+        service.users().messages().modify.assert_called_with(
+            userId="me", id="msg123", body={"addLabelIds": ["Label_42"]},
+        )
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_removes_labels(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+        service.users().messages().modify().execute.return_value = {}
+
+        result = await _modify_labels({
+            "message_id": "msg123",
+            "remove_label_ids": ["Label_42"],
+        })
+
+        assert not _is_error(result)
+        assert "removed labels" in _parse_text(result)
+        service.users().messages().modify.assert_called_with(
+            userId="me", id="msg123", body={"removeLabelIds": ["Label_42"]},
+        )
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_add_and_remove_labels(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+        service.users().messages().modify().execute.return_value = {}
+
+        result = await _modify_labels({
+            "message_id": "msg123",
+            "add_label_ids": ["Label_1"],
+            "remove_label_ids": ["Label_2"],
+        })
+
+        assert not _is_error(result)
+        assert "added labels" in _parse_text(result)
+        assert "removed labels" in _parse_text(result)
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_requires_at_least_one_label_list(self, mock_get_svc: MagicMock) -> None:
+        service = _make_service()
+        mock_get_svc.return_value = service
+
+        result = await _modify_labels({"message_id": "msg123"})
+        assert _is_error(result)
+        assert "Must provide" in _parse_text(result)
+
+    @patch.object(gmail_server, "_gmail_service", None)
+    @patch("src.mcp.gmail_server._get_gmail_service")
+    async def test_error_handling(self, mock_get_svc: MagicMock) -> None:
+        mock_get_svc.side_effect = Exception("API error")
+
+        result = await _modify_labels({
+            "message_id": "msg789",
+            "add_label_ids": ["Label_1"],
+        })
+        assert _is_error(result)
+        assert "Failed to modify labels" in _parse_text(result)
