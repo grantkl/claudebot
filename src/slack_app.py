@@ -148,6 +148,10 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         # so the session *has* every server available — but only the needed
         # subset is toggled on before each API call.
         needed_servers = classify_needed_servers(cleaned_text) & mcp_server_names
+        # Memory is always on for authorized users — Claude should
+        # proactively check memory for context on every message.
+        if "memory" in mcp_server_names:
+            needed_servers.add("memory")
 
         # Thread history hydration for cold sessions in existing threads
         thread_context: str | None = None
