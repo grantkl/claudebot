@@ -19,7 +19,7 @@ write_result() {
 import json, sys
 with open('$RESULT_FILE', 'w') as f:
     json.dump({'status': sys.argv[1], 'message': sys.argv[2], 'timestamp': sys.argv[3]}, f, indent=2)
-" "$status" "$message"
+" "$status" "$message" "$timestamp"
 }
 
 echo "$(date) - Starting deploy..."
