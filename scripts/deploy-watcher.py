@@ -36,6 +36,12 @@ def main() -> None:
                 log("Deploy finished successfully")
             else:
                 log(f"Deploy failed with exit code {result.returncode}")
+                # deploy.sh cleans up the trigger on success, but on
+                # crash the file may be left behind.  Remove it here
+                # to avoid retrying a broken deploy every 2 seconds.
+                if os.path.exists(TRIGGER_FILE):
+                    os.remove(TRIGGER_FILE)
+                    log("Removed stale trigger file after failed deploy")
         time.sleep(POLL_INTERVAL)
 
 
