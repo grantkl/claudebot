@@ -31,6 +31,10 @@ from .error_utils import classify_error
 
 logger = logging.getLogger(__name__)
 
+# MCP servers that should never be toggled off.  They stay enabled for the
+# entire session lifetime so their tools are always available.
+_ALWAYS_ON_SERVERS: set[str] = {"memory"}
+
 
 @dataclass
 class SessionEntry:
@@ -254,8 +258,11 @@ class ClaudeManager:
             await client.connect()
             # Start with all MCP servers disabled — we selectively enable
             # only the servers needed for each message via toggle.
+            # Always-on servers (e.g. memory) are never disabled so their
+            # tools remain available throughout the session.
             server_names_in_session = set(mcp_servers.keys())
-            for name in server_names_in_session:
+            always_on = server_names_in_session & _ALWAYS_ON_SERVERS
+            for name in server_names_in_session - always_on:
                 try:
                     await client.toggle_mcp_server(name, enabled=False)
                 except Exception:
@@ -264,6 +271,7 @@ class ClaudeManager:
                 client=client, last_accessed=time.time(), authorized=authorized,
                 superuser=superuser,
                 all_server_names=server_names_in_session,
+                enabled_servers=always_on,
             )
 
         query_text = text
@@ -283,7 +291,7 @@ class ClaudeManager:
 
             # Sync enabled MCP servers to match what this message needs.
             want = (needed_servers or set()) & entry.all_server_names
-            to_disable = entry.enabled_servers - want
+            to_disable = entry.enabled_servers - want - _ALWAYS_ON_SERVERS
             to_enable = want - entry.enabled_servers
             for name in to_disable:
                 try:
