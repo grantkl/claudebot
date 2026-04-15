@@ -252,6 +252,16 @@ class TaskScheduler:
             )
             response = result.text
 
+            # Claude plan-limit messages come back as a successful response body,
+            # not an exception. Detect and route to the pause flow so we don't
+            # spam DMs and keep burning the limit.
+            reset_time = self._parse_rate_limit_reset(response)
+            if reset_time is not None or "hit your limit" in response.lower():
+                if reset_time is None:
+                    reset_time = datetime.now(timezone.utc) + timedelta(hours=1)
+                await self._pause_all_for_rate_limit(reset_time)
+                return
+
             state.last_run_time = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             state.consecutive_failures = 0
 

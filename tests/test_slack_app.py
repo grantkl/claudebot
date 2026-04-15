@@ -151,7 +151,7 @@ class TestSlackApp:
         # Claude called with stripped text and sonnet model for authorized user
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list", "memory"}, needed_servers={"memory"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
@@ -234,7 +234,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list", "memory"}, needed_servers={"memory"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
@@ -261,7 +261,7 @@ class TestSlackApp:
         rate_limiter.check_and_record.assert_called_once_with("U001")
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="haiku", mcp_server_names={"stocks", "web_search"}, images=None,
+            model="haiku", mcp_server_names={"stocks", "web_search"}, needed_servers=set(), images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED,
             authorized=False, superuser=False,
             user_id="U001",
@@ -384,7 +384,7 @@ class TestSlackApp:
         client.conversations_replies.assert_not_called()
         claude_manager.send_message.assert_called_once_with(
             "parent_ts", "follow up", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list", "memory"}, needed_servers={"memory"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
@@ -702,7 +702,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="haiku", mcp_server_names={"stocks", "web_search"}, images=None,
+            model="haiku", mcp_server_names={"stocks", "web_search"}, needed_servers=set(), images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED,
             authorized=False, superuser=False,
             user_id="U001",
@@ -728,7 +728,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list", "memory"}, needed_servers={"memory"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
@@ -756,7 +756,7 @@ class TestSlackApp:
         claude_manager.remove_session.assert_called_once_with(event["ts"])
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="haiku", mcp_server_names={"stocks", "web_search"}, images=None,
+            model="haiku", mcp_server_names={"stocks", "web_search"}, needed_servers=set(), images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED,
             authorized=False, superuser=False,
             user_id="U001",
@@ -804,7 +804,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="opus", mcp_server_names={"sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "playwright", "stocks", "web_search", "shopping_list", "calendar"}, images=None,
+            model="opus", mcp_server_names={"sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "stocks", "web_search", "shopping_list", "calendar", "memory"}, needed_servers={"memory"}, images=None,
             disallowed_tools=None, authorized=True, superuser=True,
             user_id="U001",
             user_name="TestUser",
@@ -830,7 +830,7 @@ class TestSlackApp:
 
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list", "memory"}, needed_servers={"memory"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
@@ -859,7 +859,7 @@ class TestSlackApp:
         claude_manager.remove_session.assert_called_once_with(event["ts"])
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
-            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "playwright", "stocks", "web_search", "shopping_list"}, images=None,
+            model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list", "memory"}, needed_servers={"memory"}, images=None,
             disallowed_tools=_NON_SUPERUSER_DISALLOWED, authorized=True, superuser=False,
             user_id="U001",
             user_name="TestUser",
