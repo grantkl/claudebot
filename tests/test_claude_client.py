@@ -785,17 +785,17 @@ class TestClaudeManager:
         assert "current user" not in options.system_prompt
 
     @pytest.mark.asyncio
-    async def test_playwright_system_prompt_included_when_playwright_in_mcp_server_names(self):
+    async def test_playwright_system_prompt_included_when_playwright_enabled(self):
         config = _make_config()
         manager = ClaudeManager(config)
-        manager._mcp_servers = {"playwright": "pw_srv"}
         fake_client = _FakeClaudeSDKClient()
         fake_client.set_responses([
             _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
             _FakeResultMessage(),
         ])
-        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
-            await manager.send_message("t1", "hello", mcp_server_names={"playwright"})
+        with patch.dict("os.environ", {"PLAYWRIGHT_ENABLED": "true"}), \
+             patch("src.claude_client.ClaudeSDKClient", return_value=fake_client) as mock_cls:
+            await manager.send_message("t1", "hello")
         call_kwargs = mock_cls.call_args
         options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
         assert "browser automation" in options.system_prompt

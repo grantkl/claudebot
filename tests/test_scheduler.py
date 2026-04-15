@@ -693,6 +693,33 @@ class TestRateLimitPauseResume:
 
         scheduler._rate_limit_resume_task.cancel()
 
+    async def test_rate_limit_in_response_body_triggers_pause(self, tmp_path):
+        """Claude CLI returns plan-limit text as a successful response, not an
+        exception. The scheduler must still detect it and pause."""
+        task1 = {**_sample_task_data(), "id": "task1", "name": "Task 1"}
+        task2 = {**_sample_task_data(), "id": "task2", "name": "Task 2"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task1, task2])
+        scheduler._claude_manager.send_message = AsyncMock(
+            return_value=_mock_result("You've hit your limit · resets 5am (UTC)")
+        )
+        scheduler._claude_manager.remove_session = AsyncMock()
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            mock_client = AsyncMock()
+            MockClient.return_value = mock_client
+            await scheduler._execute_task(scheduler._tasks["task1"])
+
+        assert scheduler._state["task1"].rate_limit_paused is True
+        assert scheduler._state["task2"].rate_limit_paused is True
+        # The rate-limit text must NOT have been DM'd as a task result —
+        # only the single rate-limit alert should go out.
+        dm_texts = [c.kwargs["text"] for c in mock_client.chat_postMessage.call_args_list]
+        assert not any("hit your limit" in t.lower() for t in dm_texts)
+        assert any("rate limit" in t.lower() for t in dm_texts)
+
+        if scheduler._rate_limit_resume_task:
+            scheduler._rate_limit_resume_task.cancel()
+
     async def test_duplicate_pause_is_idempotent(self, tmp_path):
         tasks = [_sample_task_data()]
         scheduler = _make_scheduler(tmp_path, tasks=tasks)
