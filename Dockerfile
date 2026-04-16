@@ -19,8 +19,12 @@ RUN npm install -g @privilegemendes/amadeus-mcp-server && \
 RUN npm install -g @modelcontextprotocol/server-brave-search
 
 # Install Playwright CLI and browser dependencies for headless Chromium
+# 1. npx playwright install --with-deps: installs system libs (libgbm, libnss3, etc.)
+# 2. playwright-cli install-browser: downloads the Chromium build matching the CLI's
+#    bundled playwright-core (may differ from the standalone playwright version)
 RUN npm install -g @playwright/cli@latest && \
-    npx --yes playwright install --with-deps chromium
+    npx --yes playwright install --with-deps chromium && \
+    playwright-cli install-browser chromium
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -58,6 +62,14 @@ RUN useradd --create-home appuser
 
 # Create directories for scheduler config and state
 RUN mkdir -p /app/config /app/data && chown -R appuser:appuser /app/config /app/data
+
+# Configure Playwright CLI: default to bundled Chromium (not Google Chrome which
+# requires a separate install at /opt/google/chrome) and write output to a
+# directory the non-root user can write to (CWD /app is read-only).
+RUN mkdir -p /home/appuser/.playwright /home/appuser/.playwright-cli && \
+    printf '{\n  "browser": {\n    "browserName": "chromium",\n    "launchOptions": {\n      "channel": "chromium",\n      "headless": true\n    }\n  },\n  "outputDir": "/home/appuser/.playwright-cli"\n}\n' \
+      > /home/appuser/.playwright/cli.config.json && \
+    chown -R appuser:appuser /home/appuser/.playwright /home/appuser/.playwright-cli
 
 USER appuser
 
