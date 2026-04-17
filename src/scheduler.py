@@ -464,8 +464,11 @@ class TaskScheduler:
                 return next_dt.timestamp()
             else:
                 # Task has never run — schedule for the next future match.
+                # Seed croniter 60 seconds in the past so that if `now` falls
+                # within the current cron-minute window, it is still returned
+                # as the next occurrence instead of being skipped.
                 now = datetime.now(tz=self._tz)
-                cron = croniter(task.cron, now)
+                cron = croniter(task.cron, now - timedelta(seconds=60))
                 next_dt = cron.get_next(datetime)
                 return next_dt.timestamp()
         elif task.interval_seconds:
