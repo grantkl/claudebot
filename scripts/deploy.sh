@@ -2,6 +2,10 @@
 # Pull latest code and rebuild the bot container, writing result to a JSON file
 set -e
 
+# Ensure Docker Desktop binaries are on PATH (script may run from a file
+# watcher that doesn't inherit the user's shell profile).
+export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RESULT_FILE="$PROJECT_DIR/data/deploy.result"
 TRIGGER_FILE="$PROJECT_DIR/data/deploy.trigger"
