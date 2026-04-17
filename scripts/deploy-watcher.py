@@ -23,11 +23,19 @@ def main() -> None:
     while True:
         if os.path.exists(TRIGGER_FILE):
             log("Trigger file detected, starting deploy...")
-            result = subprocess.run(
-                [DEPLOY_SCRIPT],
-                capture_output=True,
-                text=True,
-            )
+            try:
+                result = subprocess.run(
+                    [DEPLOY_SCRIPT],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+            except subprocess.TimeoutExpired as exc:
+                log(f"Deploy timed out after {exc.timeout}s, killing")
+                if os.path.exists(TRIGGER_FILE):
+                    os.remove(TRIGGER_FILE)
+                time.sleep(POLL_INTERVAL)
+                continue
             if result.stdout:
                 log(result.stdout.strip())
             if result.stderr:
