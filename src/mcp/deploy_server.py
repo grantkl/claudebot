@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 TRIGGER_FILE = "/app/data/deploy.trigger"
 RESULT_FILE = "/app/data/deploy.result"
 POLL_INTERVAL = 2
-POLL_TIMEOUT = 120
+POLL_TIMEOUT = 600
 
 
 def _text(text: str) -> dict[str, Any]:

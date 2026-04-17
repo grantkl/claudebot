@@ -38,8 +38,10 @@ GIT_OUTPUT=$(git pull --ff-only 2>&1) || {
 }
 echo "$(date) - git pull: $GIT_OUTPUT"
 
-# Rebuild and restart containers
-DOCKER_OUTPUT=$(docker compose up -d --build 2>&1) || {
+# Rebuild only the bot container — other services (auth-proxy, memory)
+# don't change with bot code and rebuilding them adds several minutes
+# (memory redownloads PyTorch) which was causing deploy trigger timeouts.
+DOCKER_OUTPUT=$(docker compose up -d --build claudebot 2>&1) || {
     echo "$(date) - docker compose failed: $DOCKER_OUTPUT"
     write_result "failure" "docker compose failed: $DOCKER_OUTPUT"
     cleanup
