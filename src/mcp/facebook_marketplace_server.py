@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any
 
 from claude_agent_sdk import SdkMcpTool, tool
@@ -32,6 +33,10 @@ _DEFAULT_RADIUS_MILES = 100
 _DEFAULT_LIMIT = 25
 _MAX_LIMIT = 60
 _DEFAULT_SEEN_TTL_DAYS = 60
+# Minimum seconds between scrapes of the same (query, location) key. Prevents
+# a runaway prompt from firing identical searches back-to-back and attracting
+# FB anti-bot attention. Different queries do NOT throttle each other.
+_DEFAULT_MIN_INTERVAL_SECONDS = 10.0
 
 _SORT_MODES = {
     "newest": "creation_time_descend",
@@ -41,10 +46,17 @@ _SORT_MODES = {
     "best_match": "best_match",
 }
 
-_USER_AGENT = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/124.0.0.0 Safari/537.36"
+# Default to Mac Chrome — most US users export cookies from a Mac, so matching
+# the likely export UA reduces anti-bot mismatch signals. Override via
+# FB_USER_AGENT to match your actual export environment.
+_DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
+
+
+def _user_agent() -> str:
+    return os.environ.get("FB_USER_AGENT", _DEFAULT_USER_AGENT)
 
 
 def _text(text: str) -> dict[str, Any]:
@@ -76,6 +88,17 @@ def _seen_ttl_days() -> int:
     except (TypeError, ValueError):
         return _DEFAULT_SEEN_TTL_DAYS
     return max(value, 0)
+
+
+def _min_interval_seconds() -> float:
+    raw = os.environ.get("FB_MIN_INTERVAL_SECONDS")
+    if raw is None:
+        return _DEFAULT_MIN_INTERVAL_SECONDS
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_MIN_INTERVAL_SECONDS
+    return max(value, 0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -219,41 +242,97 @@ def _build_search_url(
     return f"https://www.facebook.com/marketplace/{quote(location)}/search/?{qs}"
 
 
-_PRICE_RE = re.compile(r"\$[\d,]+(?:\.\d{2})?")
+# Price: match anywhere in the line (not anchored), accept either an
+# unformatted number of 2+ digits ("$45", "$500", "$10000") OR a
+# comma-grouped number with at least one thousands group ("$1,000",
+# "$45,000"). Requiring 2+ digits skips noise like "$5 off for members".
+_PRICE_RE = re.compile(r"\$(?:\d{1,3}(?:,\d{3})+|\d{2,})(?:\.\d{2})?")
 _MILEAGE_RE = re.compile(r"([\d,]+)\s*(?:mi|miles|K miles|k miles)\b", re.IGNORECASE)
 _YEAR_RE = re.compile(r"\b(19[5-9]\d|20\d{2})\b")
+# "City, ST" — letters/spaces/periods, comma, 2 capital letters. Covers
+# "Seattle, WA", "San Francisco, CA", "St. Louis, MO" etc. Explicitly NOT
+# matching "Wood, solid" (lowercase tail) or "123 Main, Apt" (not a state).
+_LOCATION_RE = re.compile(r"^[A-Za-z][A-Za-z.\s]*,\s*[A-Z]{2}$")
+# Card badges that FB overlays ahead of the real title. Match lowercase.
+_BADGE_WORDS = frozenset({
+    "new listing",
+    "just listed",
+    "sponsored",
+    "free",
+    "trending",
+    "only a few left",
+    "promoted",
+})
 
 
 def _parse_listing_text(text: str) -> dict[str, Any]:
-    """Parse the visible text of a marketplace card into structured fields."""
+    """Parse the visible text of a marketplace card into structured fields.
+
+    Strategy:
+      - price: first $-prefixed number anywhere in the text (>=2 digits)
+      - location: last line, if it matches the "City, ST" pattern
+      - title: longest remaining line after removing price-only, badge,
+        mileage-only, and location lines. This survives FB adding badge
+        overlays ("New listing", "Just listed") ahead of the real title.
+      - year/mileage: extracted from the chosen title / full text
+    """
     lines = [line.strip() for line in text.splitlines() if line.strip()]
-    price = None
-    title = None
-    location = None
-    mileage = None
-    year = None
+    if not lines:
+        return {
+            "title": None,
+            "price": None,
+            "year": None,
+            "mileage": None,
+            "location": None,
+        }
 
+    # --- Price: first match anywhere in any line ---
+    price: str | None = None
     for line in lines:
-        if price is None and _PRICE_RE.match(line):
-            price = line.split()[0].replace(",", "")
-        elif title is None and not _PRICE_RE.match(line):
-            title = line
+        m = _PRICE_RE.search(line)
+        if m:
+            # m.group(0) is the full "$45,000.00"; normalize by dropping commas.
+            price = m.group(0).replace(",", "")
+            break
 
+    # --- Location: only meaningful when there's enough text around it ---
+    location: str | None = None
+    if len(lines) >= 3:
+        candidate = lines[-1]
+        if _LOCATION_RE.match(candidate) and len(candidate) < 60:
+            location = candidate
+
+    # --- Title: longest remaining line after filtering noise ---
+    def _is_title_candidate(line: str) -> bool:
+        # Any line containing '$' is almost certainly a price line or
+        # price-dominated chatter ("Listed today: $45,000 or best offer"),
+        # not the item's real title. Filter them out.
+        if "$" in line:
+            return False
+        if location is not None and line == location:
+            return False
+        if line.lower().strip() in _BADGE_WORDS:
+            return False
+        # Skip mileage-only lines ("125,000 miles", "45K miles") so they
+        # don't outcompete the real title purely by character count.
+        if _MILEAGE_RE.fullmatch(line):
+            return False
+        return True
+
+    candidates = [line for line in lines if _is_title_candidate(line)]
+    title = max(candidates, key=len) if candidates else None
+
+    year: int | None = None
     if title:
         m = _YEAR_RE.search(title)
         if m:
             year = int(m.group(1))
 
+    mileage: str | None = None
     joined = "\n".join(lines)
     m = _MILEAGE_RE.search(joined)
     if m:
         mileage = m.group(0)
-
-    # Best-effort: last line often looks like "Seattle, WA"
-    if len(lines) >= 3:
-        candidate = lines[-1]
-        if "," in candidate and len(candidate) < 60:
-            location = candidate
 
     return {
         "title": title,
@@ -355,6 +434,52 @@ async def _get_browser() -> Any:
         return _browser
 
 
+# ---------------------------------------------------------------------------
+# Per-key rate limiter
+#
+# Prevents burst-scraping the same query+location from burning through FB's
+# anti-bot budget. Enforces a minimum interval between hits to the same key.
+# Different keys do not throttle each other, so the 911 hunter's 7 distinct
+# queries are not slowed down.
+# ---------------------------------------------------------------------------
+
+
+_last_scrape_time: dict[str, float] = {}
+_rate_lock: asyncio.Lock | None = None
+
+
+def _get_rate_lock() -> asyncio.Lock:
+    global _rate_lock
+    if _rate_lock is None:
+        _rate_lock = asyncio.Lock()
+    return _rate_lock
+
+
+async def _enforce_rate_limit(key: str) -> None:
+    """If we scraped `key` too recently, await the remaining cooldown.
+
+    Reserves the slot before awaiting so concurrent callers with the same key
+    stack up correctly rather than all sailing through.
+    """
+    min_interval = _min_interval_seconds()
+    if min_interval <= 0:
+        return
+
+    async with _get_rate_lock():
+        now = time.monotonic()
+        last = _last_scrape_time.get(key, 0.0)
+        elapsed = now - last
+        if elapsed >= min_interval:
+            _last_scrape_time[key] = now
+            return
+        wait = min_interval - elapsed
+        # Reserve the slot NOW; concurrent callers queue up from this point.
+        _last_scrape_time[key] = now + wait
+
+    logger.info("FB rate-limit: sleeping %.2fs for key=%r", wait, key)
+    await asyncio.sleep(wait)
+
+
 async def _close_browser_pool() -> None:
     """Shut down the shared browser (called at process exit / from tests)."""
     global _playwright_instance, _browser
@@ -377,7 +502,7 @@ async def _new_context(storage_state: Any) -> Any:
     browser = await _get_browser()
     return await browser.new_context(
         storage_state=storage_state,
-        user_agent=_USER_AGENT,
+        user_agent=_user_agent(),
         viewport={"width": 1366, "height": 900},
         locale="en-US",
     )
@@ -405,6 +530,9 @@ async def _scrape_search(
     sort_by: str,
     limit: int,
 ) -> list[dict[str, Any]]:
+    # Throttle identical query+location hits before touching the browser.
+    await _enforce_rate_limit(f"{location}|{query.strip().lower()}")
+
     storage_state = _resolve_storage_state()
 
     url = _build_search_url(
@@ -479,6 +607,18 @@ async def _scrape_search(
             await context.close()
         except Exception:  # noqa: BLE001
             pass
+
+    # Zero anchors on a cookies-authenticated request usually means FB is
+    # soft-blocking (empty feed, captcha overlay on same URL) — distinct from
+    # "redirect to /login" which we already catch above. Surface it so the
+    # caller can explain honestly rather than return "no results".
+    if not raw:
+        logger.warning(
+            "FB scrape returned 0 anchors for query=%r location=%r — possible "
+            "soft-block (captcha overlay or empty feed).",
+            query,
+            location,
+        )
 
     results: list[dict[str, Any]] = []
     for item in raw[:limit]:

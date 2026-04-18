@@ -12,12 +12,20 @@ Usage:
     python scripts/fb-cookies-export.py --output data/fb_cookies.json
 
 Notes:
-  - You must have a regular Facebook account. Two-factor prompts work fine
-    in the browser window.
+  - STRONGLY RECOMMENDED: use a dedicated Facebook account for scraping,
+    not your personal one. Facebook periodically bans accounts they
+    detect scraping Marketplace. A ban on a dedicated account costs you
+    nothing; a ban on your personal account is a real problem. Create a
+    throwaway account once, then reuse its cookies indefinitely.
+  - You must have a working Facebook account. Two-factor prompts work
+    fine in the browser window.
   - Re-run when the MCP starts returning "Facebook redirected to login" —
     typically every few weeks as FB rotates session tokens.
   - The resulting JSON contains live session credentials. Treat it like a
     password: do not commit it to git (``data/`` is in .gitignore).
+  - If you log in from a Mac, the default FB_USER_AGENT (Mac Chrome) will
+    match. Set FB_USER_AGENT in your env if you exported from Windows or
+    Linux — UA/cookie mismatch is a common anti-bot trigger.
 """
 
 from __future__ import annotations
@@ -53,6 +61,7 @@ async def _capture(output: str) -> int:
         print(
             "\nA Chromium window is open.\n"
             "  1. Log into Facebook (email + password, plus 2FA if enabled).\n"
+            "     Prefer a dedicated scraping account — see script docstring.\n"
             "  2. Confirm you can see your news feed or Marketplace.\n"
             "  3. Come back here and press ENTER to save cookies.\n"
         )
