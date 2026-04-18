@@ -198,6 +198,19 @@ class ClaudeManager:
                     " Use award_trip_details to get flight segments,"
                     " times, and booking links for a specific result from a cached search."
                 )
+            if mcp_server_names and "fb_marketplace" in mcp_server_names:
+                system_prompt += (
+                    "\n\nYou have access to Facebook Marketplace search via MCP tools."
+                    " Use fb_marketplace_search to find listings (e.g., cars, furniture)"
+                    " by query + location + price range; it returns title, price, year,"
+                    " mileage, location, and the listing URL. Use"
+                    " fb_marketplace_listing_details to read the full description and"
+                    " seller details for a promising listing. For scheduled hunter"
+                    " tasks, set dedup_label so you only surface listings you haven't"
+                    " already reported (fb_marketplace_forget_seen clears that cache)."
+                    " The scraper needs a valid session cookie file — if it returns a"
+                    " login/checkpoint error, tell the user to re-export cookies."
+                )
             if mcp_server_names and "stocks" in mcp_server_names:
                 system_prompt += (
                     "\n\nYou have access to stock market data via MCP tools."

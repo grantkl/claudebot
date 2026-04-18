@@ -18,13 +18,16 @@ RUN npm install -g @privilegemendes/amadeus-mcp-server && \
     /usr/lib/node_modules/@privilegemendes/amadeus-mcp-server/dist/index.js
 RUN npm install -g @modelcontextprotocol/server-brave-search
 
-# Install Playwright CLI and browser dependencies for headless Chromium
-# 1. npx playwright install --with-deps: installs system libs (libgbm, libnss3, etc.)
-# 2. playwright-cli install-browser: downloads the Chromium build matching the CLI's
-#    bundled playwright-core (may differ from the standalone playwright version)
+# Install Playwright CLI and browser dependencies for headless Chromium.
+# Using a shared /opt path so both the Node CLI (used via Bash) and the
+# Python `playwright` package (used by the fb_marketplace MCP) can find
+# browsers when running as the non-root appuser.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 RUN npm install -g @playwright/cli@latest && \
+    mkdir -p "$PLAYWRIGHT_BROWSERS_PATH" && \
     npx --yes playwright install --with-deps chromium && \
-    playwright-cli install-browser chromium
+    playwright-cli install-browser chromium && \
+    chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -34,6 +37,13 @@ WORKDIR /app
 # Install Python dependencies
 COPY pyproject.toml .
 RUN uv pip install --system --no-cache .
+
+# Ensure Python playwright has a matching Chromium build in the shared browser
+# path. This is a no-op if the npx install above already put the same version
+# there; otherwise it adds a second build alongside it. System libs are already
+# installed by the npx step above, so no --with-deps needed here.
+RUN python -m playwright install chromium && \
+    chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"
 
 # Install Google Flights MCP server (HaroldLeo — fast-flights scraper with SerpAPI fallback)
 RUN apt-get update && apt-get install -y --no-install-recommends git && \

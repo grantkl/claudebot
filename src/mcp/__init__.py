@@ -105,6 +105,13 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
             name="seats_aero", version="1.0.0", tools=SEATS_AERO_TOOLS
         )
 
+    fb_marketplace_enabled = os.environ.get("FB_MARKETPLACE_ENABLED", "").lower() in ("1", "true", "yes")
+    if fb_marketplace_enabled:
+        from .facebook_marketplace_server import FB_MARKETPLACE_TOOLS
+        servers["fb_marketplace"] = create_sdk_mcp_server(
+            name="fb_marketplace", version="1.0.0", tools=FB_MARKETPLACE_TOOLS
+        )
+
 
     shopping_list_enabled = os.environ.get("SHOPPING_LIST_ENABLED", "").lower() in ("1", "true", "yes")
     if shopping_list_enabled:

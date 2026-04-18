@@ -30,6 +30,7 @@ docker compose logs -f claudebot
 | `FLIGHTS_ENABLED=true` | Flight search + price watches | `AMADEUS_CLIENT_ID`, `AMADEUS_CLIENT_SECRET` |
 | `SEATS_AERO_API_KEY` | Award flight availability search (superuser) | Partner API key from seats.aero |
 | `PLAYWRIGHT_ENABLED=true` | Browser automation (superuser) | Runs headless via npx |
+| `FB_MARKETPLACE_ENABLED=true` | Facebook Marketplace search (superuser) | Cookie export: `python scripts/fb-cookies-export.py` |
 | `STOCKS_ENABLED=true` | Stock quotes, options chains, technicals (all tiers) | No API key required |
 | `BRAVE_API_KEY` | Web search via Brave Search API (all tiers) | Key from https://brave.com/search/api/ |
 | `WEBHOOK_ENABLED=true` | HTTP webhook for external signals | `WEBHOOK_PORT`, `WEBHOOK_SECRET` |
@@ -45,6 +46,7 @@ docker compose logs -f claudebot
 - **Flight Watch MCP** — monitor flight prices with automatic periodic checks; track booked itineraries by airline and flight number
 - **Seats Aero MCP** — search award flight availability across 24 loyalty programs (superuser-only)
 - **Playwright MCP** — full browser automation: navigate, click, fill forms, take screenshots (superuser-only, headless)
+- **Facebook Marketplace MCP** — scrape Marketplace listings (query + location + price + radius), fetch listing details, dedup across scheduled runs. Uses Playwright with a user-provided session cookie (superuser-only).
 - **Stocks MCP** — real-time stock quotes, options chains, and technical indicators via yfinance (all tiers)
 - **Web Search MCP** — web search via Brave Search API for news, earnings, and current events (all tiers)
 - **Scheduler** — autonomous cron/interval tasks with circuit breaker, task ownership, run-once support, and Slack DM delivery
