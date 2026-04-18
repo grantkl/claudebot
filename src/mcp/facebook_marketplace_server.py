@@ -31,6 +31,7 @@ _DEFAULT_LOCATION = "seattle"
 _DEFAULT_RADIUS_MILES = 100
 _DEFAULT_LIMIT = 25
 _MAX_LIMIT = 60
+_DEFAULT_SEEN_TTL_DAYS = 60
 
 _SORT_MODES = {
     "newest": "creation_time_descend",
@@ -66,6 +67,17 @@ def _location_default() -> str:
     return os.environ.get("FB_DEFAULT_LOCATION", _DEFAULT_LOCATION).lower()
 
 
+def _seen_ttl_days() -> int:
+    raw = os.environ.get("FB_SEEN_TTL_DAYS")
+    if raw is None:
+        return _DEFAULT_SEEN_TTL_DAYS
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_SEEN_TTL_DAYS
+    return max(value, 0)
+
+
 # ---------------------------------------------------------------------------
 # Seen-IDs store (for deduping alerts across scheduled runs)
 # ---------------------------------------------------------------------------
@@ -78,10 +90,15 @@ class _SeenStore:
     can each track their own dedup set.
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, ttl_days: int | None = None) -> None:
         self._path = path
+        self._ttl_days = _DEFAULT_SEEN_TTL_DAYS if ttl_days is None else ttl_days
         self._data: dict[str, dict[str, str]] = {}
         self._load()
+        # Opportunistic cleanup on startup — bounded file size across months of
+        # scheduled runs. 0 disables pruning.
+        if self._ttl_days > 0:
+            self.prune_older_than(self._ttl_days)
 
     def _load(self) -> None:
         if not os.path.exists(self._path):
@@ -126,6 +143,35 @@ class _SeenStore:
             return count
         return 0
 
+    def prune_older_than(self, days: int) -> int:
+        """Drop seen-IDs older than N days. Returns count removed.
+
+        Timestamps are UTC ISO-8601 with explicit ``+00:00`` offset, so string
+        comparison against a similarly-formatted cutoff is equivalent to
+        chronological comparison.
+        """
+        if days <= 0:
+            return 0
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        cutoff_iso = cutoff.isoformat()
+        total_removed = 0
+        for label in list(self._data.keys()):
+            bucket = self._data[label]
+            kept = {lid: ts for lid, ts in bucket.items() if ts >= cutoff_iso}
+            removed = len(bucket) - len(kept)
+            if removed:
+                total_removed += removed
+                if kept:
+                    self._data[label] = kept
+                else:
+                    del self._data[label]
+        if total_removed:
+            try:
+                self._save()
+            except OSError as exc:
+                logger.warning("Could not persist FB seen store prune: %s", exc)
+        return total_removed
+
 
 _seen: _SeenStore | None = None
 
@@ -133,7 +179,7 @@ _seen: _SeenStore | None = None
 def _get_seen_store() -> _SeenStore:
     global _seen
     if _seen is None:
-        _seen = _SeenStore(_seen_path())
+        _seen = _SeenStore(_seen_path(), ttl_days=_seen_ttl_days())
     return _seen
 
 
@@ -176,7 +222,6 @@ def _build_search_url(
 _PRICE_RE = re.compile(r"\$[\d,]+(?:\.\d{2})?")
 _MILEAGE_RE = re.compile(r"([\d,]+)\s*(?:mi|miles|K miles|k miles)\b", re.IGNORECASE)
 _YEAR_RE = re.compile(r"\b(19[5-9]\d|20\d{2})\b")
-_LISTING_ID_RE = re.compile(r"/marketplace/item/(\d+)")
 
 
 def _parse_listing_text(text: str) -> dict[str, Any]:
@@ -255,6 +300,100 @@ class _ScrapeError(Exception):
     pass
 
 
+# ---------------------------------------------------------------------------
+# Shared browser pool
+#
+# Launching Chromium costs 3–5s of cold start. Scheduled tasks like the 911
+# hunter fire 7+ searches in sequence, so a per-call launch burns ~30s of pure
+# overhead. Keep a single browser alive for the lifetime of the MCP process
+# and hand out fresh contexts per call (contexts are lightweight and give us a
+# clean cookie reload).
+# ---------------------------------------------------------------------------
+
+
+_playwright_instance: Any = None
+_browser: Any = None
+_browser_lock: asyncio.Lock | None = None
+
+
+def _get_browser_lock() -> asyncio.Lock:
+    # Lazy-init so we grab the lock from the currently running event loop.
+    global _browser_lock
+    if _browser_lock is None:
+        _browser_lock = asyncio.Lock()
+    return _browser_lock
+
+
+async def _get_browser() -> Any:
+    global _playwright_instance, _browser
+
+    async with _get_browser_lock():
+        if _browser is not None:
+            try:
+                if _browser.is_connected():
+                    return _browser
+            except Exception:  # noqa: BLE001
+                pass
+            # Stale/disconnected — clean up and relaunch
+            try:
+                await _browser.close()
+            except Exception:  # noqa: BLE001
+                pass
+            _browser = None
+
+        if _playwright_instance is None:
+            try:
+                from playwright.async_api import async_playwright  # type: ignore
+            except ImportError as exc:
+                raise _ScrapeError(
+                    "playwright is not installed. Install with `uv pip install playwright` "
+                    "and `playwright install chromium`."
+                ) from exc
+            _playwright_instance = await async_playwright().start()
+
+        _browser = await _playwright_instance.chromium.launch(headless=True)
+        return _browser
+
+
+async def _close_browser_pool() -> None:
+    """Shut down the shared browser (called at process exit / from tests)."""
+    global _playwright_instance, _browser
+    async with _get_browser_lock():
+        if _browser is not None:
+            try:
+                await _browser.close()
+            except Exception:  # noqa: BLE001
+                pass
+            _browser = None
+        if _playwright_instance is not None:
+            try:
+                await _playwright_instance.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            _playwright_instance = None
+
+
+async def _new_context(storage_state: Any) -> Any:
+    browser = await _get_browser()
+    return await browser.new_context(
+        storage_state=storage_state,
+        user_agent=_USER_AGENT,
+        viewport={"width": 1366, "height": 900},
+        locale="en-US",
+    )
+
+
+def _resolve_storage_state() -> Any:
+    cookies_path = _cookies_path()
+    if os.path.exists(cookies_path):
+        return cookies_path
+    logger.warning(
+        "No FB cookies file at %s — scraping anonymously. Results will be limited.",
+        cookies_path,
+    )
+    return None
+
+
 async def _scrape_search(
     *,
     query: str,
@@ -266,24 +405,7 @@ async def _scrape_search(
     sort_by: str,
     limit: int,
 ) -> list[dict[str, Any]]:
-    try:
-        from playwright.async_api import async_playwright  # type: ignore
-    except ImportError as exc:
-        raise _ScrapeError(
-            "playwright is not installed. Install with `uv pip install playwright` "
-            "and `playwright install chromium`."
-        ) from exc
-
-    cookies_path = _cookies_path()
-    storage_state: Any
-    if os.path.exists(cookies_path):
-        storage_state = cookies_path
-    else:
-        storage_state = None
-        logger.warning(
-            "No FB cookies file at %s — scraping anonymously. Results will be limited.",
-            cookies_path,
-        )
+    storage_state = _resolve_storage_state()
 
     url = _build_search_url(
         query=query,
@@ -295,64 +417,68 @@ async def _scrape_search(
         sort_by=sort_by,
     )
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+    context = await _new_context(storage_state)
+    try:
+        page = await context.new_page()
         try:
-            context = await browser.new_context(
-                storage_state=storage_state,
-                user_agent=_USER_AGENT,
-                viewport={"width": 1366, "height": 900},
-                locale="en-US",
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        except Exception as exc:
+            raise _ScrapeError(f"Could not load Marketplace search page: {exc}") from exc
+
+        # Check for login redirect before paying the full render wait.
+        current = page.url
+        if "/login" in current or "checkpoint" in current:
+            raise _ScrapeError(
+                "Facebook redirected to login/checkpoint. Cookies file at "
+                f"{_cookies_path()} is missing or expired. Re-export from Chrome."
             )
-            page = await context.new_page()
-            try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            except Exception as exc:
-                raise _ScrapeError(f"Could not load Marketplace search page: {exc}") from exc
 
-            # Let JS render and trigger the first GraphQL batch
-            await page.wait_for_timeout(3000)
+        # Let JS render and trigger the first GraphQL batch
+        await page.wait_for_timeout(3000)
 
-            # Detect login gate
-            current = page.url
-            if "/login" in current or "checkpoint" in current:
-                raise _ScrapeError(
-                    "Facebook redirected to login/checkpoint. Cookies file at "
-                    f"{cookies_path} is missing or expired. Re-export from Chrome."
-                )
-
-            # Scroll to trigger lazy-load of more cards, then snapshot the DOM.
-            for _ in range(3):
-                await page.mouse.wheel(0, 3000)
-                await page.wait_for_timeout(1200)
-
-            raw = await page.evaluate(
-                """() => {
-                    const anchors = document.querySelectorAll('a[href*="/marketplace/item/"]');
-                    const seen = new Set();
-                    const out = [];
-                    anchors.forEach((a) => {
-                        const href = a.getAttribute('href') || '';
-                        const match = href.match(/\\/marketplace\\/item\\/(\\d+)/);
-                        if (!match) return;
-                        const id = match[1];
-                        if (seen.has(id)) return;
-                        seen.add(id);
-                        // climb up to the card container for richer text
-                        let node = a;
-                        for (let i = 0; i < 6 && node.parentElement; i++) {
-                            node = node.parentElement;
-                        }
-                        const text = (node.innerText || a.innerText || '').trim();
-                        const img = a.querySelector('img');
-                        const image = img ? img.getAttribute('src') : null;
-                        out.push({ id, href, text, image });
-                    });
-                    return out;
-                }"""
+        # Re-check after JS — soft redirects only surface post-hydration.
+        current = page.url
+        if "/login" in current or "checkpoint" in current:
+            raise _ScrapeError(
+                "Facebook redirected to login/checkpoint. Cookies file at "
+                f"{_cookies_path()} is missing or expired. Re-export from Chrome."
             )
-        finally:
-            await browser.close()
+
+        # Scroll to trigger lazy-load of more cards, then snapshot the DOM.
+        for _ in range(3):
+            await page.mouse.wheel(0, 3000)
+            await page.wait_for_timeout(1200)
+
+        raw = await page.evaluate(
+            """() => {
+                const anchors = document.querySelectorAll('a[href*="/marketplace/item/"]');
+                const seen = new Set();
+                const out = [];
+                anchors.forEach((a) => {
+                    const href = a.getAttribute('href') || '';
+                    const match = href.match(/\\/marketplace\\/item\\/(\\d+)/);
+                    if (!match) return;
+                    const id = match[1];
+                    if (seen.has(id)) return;
+                    seen.add(id);
+                    // climb up to the card container for richer text
+                    let node = a;
+                    for (let i = 0; i < 6 && node.parentElement; i++) {
+                        node = node.parentElement;
+                    }
+                    const text = (node.innerText || a.innerText || '').trim();
+                    const img = a.querySelector('img');
+                    const image = img ? img.getAttribute('src') : null;
+                    out.push({ id, href, text, image });
+                });
+                return out;
+            }"""
+        )
+    finally:
+        try:
+            await context.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     results: list[dict[str, Any]] = []
     for item in raw[:limit]:
@@ -482,41 +608,45 @@ async def fb_marketplace_listing_details(args: dict[str, Any]) -> dict[str, Any]
     if not url or "/marketplace/item/" not in url:
         return _error("A Facebook Marketplace item URL is required.")
 
-    try:
-        from playwright.async_api import async_playwright  # type: ignore
-    except ImportError:
-        return _error("playwright not installed on this server.")
-
     cookies_path = _cookies_path()
     storage_state: Any = cookies_path if os.path.exists(cookies_path) else None
 
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            try:
-                context = await browser.new_context(
-                    storage_state=storage_state,
-                    user_agent=_USER_AGENT,
-                    viewport={"width": 1366, "height": 900},
-                    locale="en-US",
-                )
-                page = await context.new_page()
-                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-                await page.wait_for_timeout(2500)
-                current = page.url
-                if "/login" in current or "checkpoint" in current:
-                    return _error(
-                        "Facebook redirected to login. Cookies at "
-                        f"{cookies_path} missing or expired."
-                    )
-                text = await page.evaluate(
-                    "() => (document.querySelector('main') || document.body).innerText"
-                )
-            finally:
-                await browser.close()
+        context = await _new_context(storage_state)
+    except _ScrapeError as exc:
+        return _error(str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("FB listing details: could not start browser")
+        return _error(f"Failed to start browser: {exc}")
+
+    try:
+        page = await context.new_page()
+        await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        # Fast-fail on immediate redirect before paying the render wait.
+        current = page.url
+        if "/login" in current or "checkpoint" in current:
+            return _error(
+                "Facebook redirected to login. Cookies at "
+                f"{cookies_path} missing or expired."
+            )
+        await page.wait_for_timeout(2500)
+        current = page.url
+        if "/login" in current or "checkpoint" in current:
+            return _error(
+                "Facebook redirected to login. Cookies at "
+                f"{cookies_path} missing or expired."
+            )
+        text = await page.evaluate(
+            "() => (document.querySelector('main') || document.body).innerText"
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("FB listing details scrape failed")
         return _error(f"Failed to fetch listing details: {exc}")
+    finally:
+        try:
+            await context.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     # Trim extreme length — the main column contains listing + below-the-fold
     # "more from this seller" cards we don't need.
