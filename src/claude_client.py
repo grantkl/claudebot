@@ -60,6 +60,12 @@ class ClaudeManager:
             from .mcp import build_mcp_servers
             self._mcp_servers = build_mcp_servers()
 
+    @property
+    def registered_mcp_server_names(self) -> set[str]:
+        """All MCP servers registered at startup, plus the 'web_search' pseudo-server
+        which is handled as a built-in Claude tool (gated via mcp_server_names)."""
+        return set(self._mcp_servers.keys()) | {"web_search"}
+
     async def start(self) -> None:
         self._cleanup_task = asyncio.create_task(self._cleanup_loop())
 
