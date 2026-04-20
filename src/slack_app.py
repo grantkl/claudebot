@@ -84,7 +84,7 @@ _SERVER_KEYWORD_RULES: list[tuple[set[str], re.Pattern[str]]] = [
         re.IGNORECASE,
     )),
     ({"deploy"}, re.compile(
-        r"\bdeploy\b|\brebuild\b",
+        r"\bre?deploy\b|\brebuild\b",
         re.IGNORECASE,
     )),
     ({"fb_marketplace"}, re.compile(
@@ -142,7 +142,7 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         # Determine the full set of servers this user is *allowed* to use
         # (authorization gate — unchanged from before).
         if superuser:
-            mcp_server_names: set[str] = {"sonos", "homekit", "gmail", "calendar", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "stocks", "web_search", "shopping_list", "memory", "fb_marketplace"}
+            mcp_server_names: set[str] = {"sonos", "homekit", "gmail", "calendar", "scheduler", "flights", "flight_watch", "google_flights", "seats_aero", "stocks", "web_search", "shopping_list", "memory", "fb_marketplace", "deploy"}
         elif authorized:
             mcp_server_names = {"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list", "memory"}
         else:

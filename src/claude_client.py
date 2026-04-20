@@ -261,6 +261,14 @@ class ClaudeManager:
                     " analyst ratings, macro events, and any real-time information"
                     " not available through other tools."
                 )
+            if mcp_server_names and "deploy" in mcp_server_names:
+                system_prompt += (
+                    "\n\nYou have access to a deploy tool (trigger_deploy) that rebuilds"
+                    " and redeploys the bot container. Use it when the user asks to"
+                    " deploy, redeploy, or rebuild after merging a PR. The bot will go"
+                    " offline briefly during the rebuild. The tool polls for a result"
+                    " file and returns the outcome."
+                )
             if set(mcp_servers) != set(self._mcp_servers):
                 system_prompt += (
                     "\n\nYou only have the tools explicitly provided to you."
