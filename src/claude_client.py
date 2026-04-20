@@ -103,6 +103,20 @@ class ClaudeManager:
                 " will be uploaded to Slack for the user. Never tell the user you"
                 " cannot upload or share files in Slack."
             )
+            system_prompt += (
+                "\n\nRESPONSE STYLE — BE TERSE: Answer exactly what was asked and"
+                " nothing more. No preamble ('Let me...', 'I'll...', 'Sure!'), no"
+                " postamble recap of what you just did, no bullet-point summaries"
+                " of tool calls, no restating the user's question. Lead with the"
+                " answer. Use one line when the answer fits in one line. Skip"
+                " hedging, disclaimers, and 'Let me know if...' closers. Code,"
+                " numbers, and direct results are fine verbatim; prose around"
+                " them should be minimal. When showing tool results, show the"
+                " result — do not narrate the process. Elaborate only when the"
+                " user asks for detail or the task genuinely requires it (e.g."
+                " a design trade-off, an ambiguous request, or a warning the"
+                " user needs to see before proceeding)."
+            )
             if mcp_server_names:
                 mcp_servers = {k: v for k, v in self._mcp_servers.items() if k in mcp_server_names}
             else:
