@@ -876,3 +876,11 @@ class TestClaudeManager:
         with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
             result = await manager.send_message("t1", "screenshot without filename")
         assert result.text == "Screenshot taken."
+
+
+def test_deploy_is_always_on():
+    """Deploy MCP must stay enabled throughout the session — toggling it off
+    breaks the trigger_deploy tool because SDK toggle calls don't reliably
+    re-enable SDK-created MCP servers."""
+    from src.claude_client import _ALWAYS_ON_SERVERS
+    assert "deploy" in _ALWAYS_ON_SERVERS

@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # MCP servers that should never be toggled off.  They stay enabled for the
 # entire session lifetime so their tools are always available.
-_ALWAYS_ON_SERVERS: set[str] = {"memory"}
+_ALWAYS_ON_SERVERS: set[str] = {"memory", "deploy"}
 
 
 @dataclass
