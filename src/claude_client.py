@@ -237,11 +237,19 @@ class ClaudeManager:
                     " Available tools: stock_quote (current price/fundamentals),"
                     " options_expirations (available expiry dates),"
                     " options_chain (calls/puts with greeks for a given expiration),"
-                    " stock_technicals (SMA, RSI, MACD, Bollinger Bands)."
+                    " stock_technicals (SMA, RSI, MACD, Bollinger Bands),"
+                    " short_interest (SI%, days-to-cover, float, MoM trend —"
+                    " merges yfinance + Finnhub),"
+                    " short_volume (FINRA reg SHO daily short sale ratio),"
+                    " squeeze_score (0-100 composite short squeeze signal),"
+                    " squeeze_screener (rank a watchlist by squeeze score)."
                     " For options analysis, use this workflow: stock_quote first"
                     " (get current price), then stock_technicals (trend/momentum),"
-                    " then options_chain (specific strikes). Be direct and"
-                    " concise — the user wants actionable analysis, not disclaimers."
+                    " then options_chain (specific strikes)."
+                    " For short squeeze research: use squeeze_score on a single"
+                    " ticker, or squeeze_screener for a watchlist."
+                    " Be direct and concise — the user wants actionable analysis,"
+                    " not disclaimers."
                 )
             if mcp_server_names and "memory" in mcp_server_names:
                 system_prompt += (

@@ -43,6 +43,10 @@ _stock_quote = stocks_server.stock_quote.handler
 _options_expirations = stocks_server.options_expirations.handler
 _options_chain = stocks_server.options_chain.handler
 _stock_technicals = stocks_server.stock_technicals.handler
+_short_interest = stocks_server.short_interest.handler
+_short_volume = stocks_server.short_volume.handler
+_squeeze_score = stocks_server.squeeze_score.handler
+_squeeze_screener = stocks_server.squeeze_screener.handler
 
 
 def _parse_text(result: dict[str, Any]) -> str:
@@ -610,14 +614,288 @@ class TestStockTechnicals:
 
 
 # ---------------------------------------------------------------------------
+# short_interest
+# ---------------------------------------------------------------------------
+class TestShortInterest:
+    @patch("src.mcp.stocks_server._fetch_finnhub_metrics")
+    @patch("src.mcp.stocks_server.yf")
+    async def test_basic_short_interest(self, mock_yf: MagicMock, mock_finnhub: MagicMock) -> None:
+        ticker = MagicMock()
+        ticker.info = {
+            "sharesShort": 15_000_000,
+            "sharesShortPriorMonth": 10_000_000,
+            "shortPercentOfFloat": 0.35,  # 35%
+            "shortRatio": 8.5,
+            "floatShares": 40_000_000,
+            "sharesOutstanding": 50_000_000,
+            "dateShortInterest": "2026-04-15",
+        }
+        mock_yf.Ticker.return_value = ticker
+
+        async def _no_finnhub(_: str) -> None:
+            return None
+        mock_finnhub.side_effect = _no_finnhub
+
+        result = await _short_interest({"symbol": "GME"})
+        data = json.loads(_parse_text(result))
+
+        assert not _is_error(result)
+        assert data["symbol"] == "GME"
+        assert data["shares_short"] == 15_000_000
+        assert data["short_pct_of_float"] == 35.0  # normalized from 0.35
+        assert data["days_to_cover"] == 8.5
+        assert data["si_change_pct"] == 50.0  # (15-10)/10 * 100
+        assert data["sources"] == ["yfinance"]
+
+    @patch("src.mcp.stocks_server._fetch_finnhub_metrics")
+    @patch("src.mcp.stocks_server.yf")
+    async def test_with_finnhub_data(self, mock_yf: MagicMock, mock_finnhub: MagicMock) -> None:
+        ticker = MagicMock()
+        ticker.info = {"sharesShort": 1000, "shortPercentOfFloat": 0.05, "shortRatio": 2.0}
+        mock_yf.Ticker.return_value = ticker
+
+        async def _finnhub(_: str) -> dict[str, Any]:
+            return {"shortRatioAnnual": 2.3, "shortInterestSharesOutstanding": 1200}
+        mock_finnhub.side_effect = _finnhub
+
+        result = await _short_interest({"symbol": "AAPL"})
+        data = json.loads(_parse_text(result))
+
+        assert not _is_error(result)
+        assert "finnhub" in data
+        assert data["finnhub"]["short_ratio"] == 2.3
+        assert "finnhub" in data["sources"]
+
+    @patch("src.mcp.stocks_server.yf")
+    async def test_error_on_exception(self, mock_yf: MagicMock) -> None:
+        mock_yf.Ticker.side_effect = Exception("bad symbol")
+        result = await _short_interest({"symbol": "BAD"})
+        assert _is_error(result)
+        assert "Failed to get short interest" in _parse_text(result)
+
+
+# ---------------------------------------------------------------------------
+# short_volume (FINRA)
+# ---------------------------------------------------------------------------
+class TestShortVolume:
+    @patch("src.mcp.stocks_server._fetch_finra_short_volume")
+    async def test_returns_daily_ratios(self, mock_fetch: MagicMock) -> None:
+        # Return data for every queried date.
+        async def _fetch(_d: Any) -> dict[str, dict[str, int]]:
+            return {"GME": {"short_volume": 600, "total_volume": 1000}}
+        mock_fetch.side_effect = _fetch
+
+        result = await _short_volume({"symbol": "GME", "days": 3})
+        data = json.loads(_parse_text(result))
+
+        assert not _is_error(result)
+        assert data["symbol"] == "GME"
+        assert data["days_returned"] == 3
+        assert data["avg_short_ratio_pct"] == 60.0
+        assert all(row["short_ratio_pct"] == 60.0 for row in data["daily"])
+
+    @patch("src.mcp.stocks_server._fetch_finra_short_volume")
+    async def test_no_data_returns_error(self, mock_fetch: MagicMock) -> None:
+        async def _fetch(_d: Any) -> None:
+            return None
+        mock_fetch.side_effect = _fetch
+
+        result = await _short_volume({"symbol": "NOPE", "days": 2})
+        assert _is_error(result)
+        assert "No FINRA short volume" in _parse_text(result)
+
+    @patch("src.mcp.stocks_server._fetch_finra_short_volume")
+    async def test_symbol_missing_from_file(self, mock_fetch: MagicMock) -> None:
+        async def _fetch(_d: Any) -> dict[str, dict[str, int]]:
+            return {"AAPL": {"short_volume": 100, "total_volume": 200}}
+        mock_fetch.side_effect = _fetch
+
+        result = await _short_volume({"symbol": "MISSING", "days": 2})
+        assert _is_error(result)
+
+
+# ---------------------------------------------------------------------------
+# squeeze_score component scorers
+# ---------------------------------------------------------------------------
+class TestSqueezeComponents:
+    def test_score_short_interest(self) -> None:
+        assert stocks_server._score_short_interest(None) == (0.0, "no SI data")
+        pts, _ = stocks_server._score_short_interest(25.0)
+        assert pts == 25.0
+        pts, _ = stocks_server._score_short_interest(50.0)
+        assert pts == 40.0  # capped
+
+    def test_score_days_to_cover(self) -> None:
+        assert stocks_server._score_days_to_cover(None)[0] == 0.0
+        assert stocks_server._score_days_to_cover(5.0)[0] == 10.0
+        assert stocks_server._score_days_to_cover(15.0)[0] == 20.0  # capped
+
+    def test_score_si_trend_zero_on_decrease(self) -> None:
+        pts, _ = stocks_server._score_si_trend(-10.0)
+        assert pts == 0.0
+
+    def test_score_si_trend_positive(self) -> None:
+        pts, _ = stocks_server._score_si_trend(50.0)
+        assert pts == 10.0  # capped
+
+    def test_score_volume_spike(self) -> None:
+        assert stocks_server._score_volume_spike(None, 100)[0] == 0.0
+        assert stocks_server._score_volume_spike(100, 100)[0] == 0.0  # 1x, below 1.2x threshold
+        pts, _ = stocks_server._score_volume_spike(300, 100)  # 3x
+        assert pts == 9.0  # (3-1.2)*5 = 9
+
+    def test_score_technical_breakout(self) -> None:
+        pts, desc = stocks_server._score_technical(105, 100, 65)
+        assert pts == 10.0
+        assert ">SMA20" in desc
+        pts, _ = stocks_server._score_technical(95, 100, 50)
+        assert pts == 0.0
+
+
+# ---------------------------------------------------------------------------
+# squeeze_score integration (mocks yfinance + FINRA helper)
+# ---------------------------------------------------------------------------
+class TestSqueezeScore:
+    @patch("src.mcp.stocks_server._compute_short_volume")
+    @patch("src.mcp.stocks_server.yf")
+    async def test_high_squeeze_score(self, mock_yf: MagicMock, mock_sv: MagicMock) -> None:
+        ticker = MagicMock()
+        ticker.info = {
+            "shortPercentOfFloat": 0.40,  # 40%
+            "shortRatio": 10.0,
+            "sharesShort": 15_000_000,
+            "sharesShortPriorMonth": 10_000_000,  # +50% MoM
+            "floatShares": 10_000_000,  # low float
+        }
+        ticker.history.return_value = _make_history_df()
+        mock_yf.Ticker.return_value = ticker
+
+        async def _sv(symbol: str, days: int) -> dict[str, Any]:
+            return {"avg_short_ratio_pct": 55.0}
+        mock_sv.side_effect = _sv
+
+        result = await _squeeze_score({"symbol": "GME"})
+        data = json.loads(_parse_text(result))
+
+        assert not _is_error(result)
+        assert data["symbol"] == "GME"
+        assert data["squeeze_score"] > 70  # all components hot
+        assert data["verdict"] == "strong squeeze setup"
+        assert "low_float" in data["flags"]
+        assert "extreme_short_interest" in data["flags"]
+        assert "high_days_to_cover" in data["flags"]
+
+    @patch("src.mcp.stocks_server._compute_short_volume")
+    @patch("src.mcp.stocks_server.yf")
+    async def test_low_squeeze_score(self, mock_yf: MagicMock, mock_sv: MagicMock) -> None:
+        ticker = MagicMock()
+        ticker.info = {
+            "shortPercentOfFloat": 0.02,  # 2%
+            "shortRatio": 0.5,
+            "sharesShort": 1000,
+            "sharesShortPriorMonth": 1000,
+            "floatShares": 1_000_000_000,
+        }
+        ticker.history.return_value = _make_history_df()
+        mock_yf.Ticker.return_value = ticker
+
+        async def _sv(symbol: str, days: int) -> dict[str, Any]:
+            return {"avg_short_ratio_pct": 15.0}
+        mock_sv.side_effect = _sv
+
+        result = await _squeeze_score({"symbol": "AAPL"})
+        data = json.loads(_parse_text(result))
+
+        assert not _is_error(result)
+        assert data["squeeze_score"] < 30
+        assert data["verdict"] == "no squeeze signal"
+        assert data["flags"] == []
+
+
+# ---------------------------------------------------------------------------
+# squeeze_screener
+# ---------------------------------------------------------------------------
+class TestSqueezeScreener:
+    @patch("src.mcp.stocks_server._compute_squeeze_score")
+    async def test_ranks_by_score(self, mock_score: MagicMock) -> None:
+        async def _score(symbol: str) -> dict[str, Any]:
+            payload = {
+                "GME": {"score": 85, "verdict": "strong squeeze setup", "flags": ["low_float"]},
+                "AMC": {"score": 55, "verdict": "moderate squeeze setup", "flags": []},
+                "AAPL": {"score": 10, "verdict": "no squeeze signal", "flags": []},
+            }[symbol]
+            return {
+                "symbol": symbol,
+                "squeeze_score": payload["score"],
+                "verdict": payload["verdict"],
+                "flags": payload["flags"],
+                "inputs": {"si_pct": payload["score"] / 2, "days_to_cover": 5},
+            }
+        mock_score.side_effect = _score
+
+        result = await _squeeze_screener({"symbols": ["AAPL", "GME", "AMC"], "min_score": 30})
+        data = json.loads(_parse_text(result))
+
+        assert not _is_error(result)
+        assert data["scanned"] == 3
+        assert data["matched"] == 2  # AAPL filtered out
+        assert data["results"][0]["symbol"] == "GME"
+        assert data["results"][1]["symbol"] == "AMC"
+
+    @patch("src.mcp.stocks_server._compute_squeeze_score")
+    async def test_collects_errors(self, mock_score: MagicMock) -> None:
+        async def _score(symbol: str) -> dict[str, Any]:
+            if symbol == "BAD":
+                raise ValueError("bad symbol")
+            return {
+                "symbol": symbol,
+                "squeeze_score": 60,
+                "verdict": "moderate squeeze setup",
+                "flags": [],
+                "inputs": {"si_pct": 30, "days_to_cover": 5},
+            }
+        mock_score.side_effect = _score
+
+        result = await _squeeze_screener({"symbols": ["GOOD", "BAD"]})
+        data = json.loads(_parse_text(result))
+
+        assert data["matched"] == 1
+        assert len(data["errors"]) == 1
+        assert data["errors"][0]["symbol"] == "BAD"
+
+    async def test_caps_at_25_symbols(self) -> None:
+        with patch("src.mcp.stocks_server._compute_squeeze_score") as mock_score:
+            async def _score(symbol: str) -> dict[str, Any]:
+                return {
+                    "symbol": symbol, "squeeze_score": 0, "verdict": "no squeeze signal",
+                    "flags": [], "inputs": {"si_pct": 0, "days_to_cover": 0},
+                }
+            mock_score.side_effect = _score
+
+            symbols = [f"SYM{i}" for i in range(50)]
+            result = await _squeeze_screener({"symbols": symbols})
+            data = json.loads(_parse_text(result))
+            assert data["scanned"] == 25
+
+
+# ---------------------------------------------------------------------------
 # STOCKS_TOOLS export
 # ---------------------------------------------------------------------------
 class TestStocksToolsExport:
-    def test_exports_all_four_tools(self) -> None:
+    def test_exports_all_tools(self) -> None:
         tools = stocks_server.STOCKS_TOOLS
-        assert len(tools) == 4
+        assert len(tools) == 8
         names = {t.name for t in tools}
-        assert names == {"stock_quote", "options_expirations", "options_chain", "stock_technicals"}
+        assert names == {
+            "stock_quote",
+            "options_expirations",
+            "options_chain",
+            "stock_technicals",
+            "short_interest",
+            "short_volume",
+            "squeeze_score",
+            "squeeze_screener",
+        }
 
     def test_tools_are_sdk_mcp_tool_instances(self) -> None:
         for t in stocks_server.STOCKS_TOOLS:
