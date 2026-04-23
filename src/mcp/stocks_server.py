@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import date, timedelta
 from typing import Any
 
@@ -339,8 +340,10 @@ async def _fetch_finra_short_volume(target_date: date) -> dict[str, dict[str, in
             continue
         sym = parts[1].strip().upper()
         try:
-            short_vol = int(parts[2])
-            total_vol = int(parts[4])
+            # FINRA publishes volumes as decimals (e.g. "385654.908207");
+            # float() then int() handles both integer and decimal formats.
+            short_vol = int(float(parts[2]))
+            total_vol = int(float(parts[4]))
         except ValueError:
             continue
         if not sym or total_vol == 0:
@@ -665,6 +668,113 @@ async def squeeze_screener(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 9. squeeze_candidates — discover squeeze universe from FINRA daily short vol
+# ---------------------------------------------------------------------------
+_SYMBOL_RE = re.compile(r"^[A-Z]{1,5}$")
+
+
+@tool(
+    "squeeze_candidates",
+    "Discover short-squeeze candidates across the entire US market from FINRA Reg SHO daily short-volume data. Returns tickers with aggressive shorting on the latest trading day, filtered by volume and short-volume ratio. Pair with squeeze_screener (feed the returned symbols) to rank by composite squeeze score. No API key, covers all NMS securities, handles weekends/holidays by stepping back up to 5 business days.",
+    {
+        "type": "object",
+        "properties": {
+            "min_volume": {
+                "type": "integer",
+                "description": "Minimum total daily volume to consider tradable (default: 2000000)",
+            },
+            "min_short_ratio": {
+                "type": "number",
+                "description": "Minimum short_volume / total_volume, range 0.0-1.0 (default: 0.60)",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum candidates to return, ranked by short ratio descending (default: 40, max: 100)",
+            },
+            "date": {
+                "type": "string",
+                "description": "Specific trading date YYYY-MM-DD (default: latest available; steps back up to 5 business days if file not yet published)",
+            },
+        },
+    },
+)
+async def squeeze_candidates(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        min_volume = int(args.get("min_volume", 2_000_000))
+        min_short_ratio = float(args.get("min_short_ratio", 0.60))
+        limit = min(max(int(args.get("limit", 40)), 1), 100)
+
+        if not 0.0 <= min_short_ratio <= 1.0:
+            return _error("min_short_ratio must be between 0.0 and 1.0")
+
+        requested_date = args.get("date")
+        if requested_date:
+            try:
+                dates_to_try = [date.fromisoformat(requested_date)]
+            except ValueError:
+                return _error(f"Invalid date '{requested_date}' (expected YYYY-MM-DD)")
+        else:
+            dates_to_try = []
+            d = date.today() - timedelta(days=1)
+            while len(dates_to_try) < 5:
+                if d.weekday() < 5:  # skip weekends
+                    dates_to_try.append(d)
+                d -= timedelta(days=1)
+
+        data: dict[str, dict[str, int]] | None = None
+        used_date: date | None = None
+        tried: list[str] = []
+        for d in dates_to_try:
+            tried.append(d.isoformat())
+            data = await _fetch_finra_short_volume(d)
+            if data:
+                used_date = d
+                break
+
+        if not data or used_date is None:
+            return _error(
+                f"FINRA Reg SHO file not available for any of: {', '.join(tried)}"
+            )
+
+        candidates: list[dict[str, Any]] = []
+        for sym, row in data.items():
+            if not _SYMBOL_RE.match(sym):
+                continue
+            total = row["total_volume"]
+            short = row["short_volume"]
+            if total < min_volume:
+                continue
+            ratio = short / total
+            if ratio < min_short_ratio:
+                continue
+            candidates.append({
+                "symbol": sym,
+                "short_volume": short,
+                "total_volume": total,
+                "short_ratio_pct": round(ratio * 100, 2),
+            })
+
+        candidates.sort(key=lambda c: c["short_ratio_pct"], reverse=True)
+        top = candidates[:limit]
+
+        return _text(json.dumps({
+            "date": used_date.isoformat(),
+            "filters": {
+                "min_volume": min_volume,
+                "min_short_ratio": min_short_ratio,
+                "limit": limit,
+            },
+            "universe_size": len(data),
+            "candidates_matched": len(candidates),
+            "returned": len(top),
+            "symbols": [c["symbol"] for c in top],
+            "details": top,
+        }, indent=2))
+    except Exception as e:
+        return _error(f"Failed to find squeeze candidates: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Export all tools
 # ---------------------------------------------------------------------------
 STOCKS_TOOLS: list[SdkMcpTool] = [
@@ -676,4 +786,5 @@ STOCKS_TOOLS: list[SdkMcpTool] = [
     short_volume,
     squeeze_score,
     squeeze_screener,
+    squeeze_candidates,
 ]
