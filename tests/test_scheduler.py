@@ -787,6 +787,71 @@ class TestRateLimitPauseResume:
         text = mock_client.chat_postMessage.call_args.kwargs["text"]
         assert "resumed" in text.lower()
 
+    async def test_manual_resume_clears_rate_limit_paused(self, tmp_path):
+        """resume_task() must clear rate_limit_paused so the pending auto-resume
+        timer doesn't later spuriously announce the task as resumed."""
+        task1 = {**_sample_task_data(), "id": "task1", "name": "Task 1"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task1])
+
+        # Simulate rate-limit paused state
+        scheduler._state["task1"] = TaskState(paused=True, rate_limit_paused=True)
+
+        scheduler.resume_task("task1")
+
+        assert scheduler._state["task1"].paused is False
+        assert scheduler._state["task1"].rate_limit_paused is False
+
+    async def test_resume_after_does_not_announce_already_resumed(self, tmp_path):
+        """If the user manually resumed a rate-limit-paused task before the
+        auto-resume fires, the auto-resume must NOT announce it as 'resumed' —
+        it's already running. The stale flag should be cleared silently."""
+        task1 = {**_sample_task_data(), "id": "task1", "name": "Task 1"}
+        task2 = {**_sample_task_data(), "id": "task2", "name": "Task 2"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task1, task2])
+
+        # task1: user already manually resumed (paused=False) but the flag
+        # wasn't cleared — simulates the pre-fix bug scenario, or any path
+        # that leaves the flag stale.
+        scheduler._state["task1"] = TaskState(paused=False, rate_limit_paused=True)
+        # task2: genuinely still rate-limit paused
+        scheduler._state["task2"] = TaskState(paused=True, rate_limit_paused=True)
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            mock_client = AsyncMock()
+            MockClient.return_value = mock_client
+            await scheduler._rate_limit_resume_after(0)
+
+        # task1's stale flag should be cleared
+        assert scheduler._state["task1"].rate_limit_paused is False
+        assert scheduler._state["task1"].paused is False
+        # task2 should have been resumed
+        assert scheduler._state["task2"].paused is False
+        assert scheduler._state["task2"].rate_limit_paused is False
+
+        # DM should only mention task2 — not task1
+        mock_client.chat_postMessage.assert_called_once()
+        text = mock_client.chat_postMessage.call_args.kwargs["text"]
+        assert "Task 2" in text
+        assert "Task 1" not in text
+        assert "1 tasks" in text  # count reflects only genuinely resumed
+
+    async def test_resume_after_no_dm_if_all_already_resumed(self, tmp_path):
+        """If every rate-limit-paused task was already manually resumed,
+        no DM should be sent at all."""
+        task1 = {**_sample_task_data(), "id": "task1", "name": "Task 1"}
+        scheduler = _make_scheduler(tmp_path, tasks=[task1])
+
+        # Stale flag only; user already resumed
+        scheduler._state["task1"] = TaskState(paused=False, rate_limit_paused=True)
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as MockClient:
+            mock_client = AsyncMock()
+            MockClient.return_value = mock_client
+            await scheduler._rate_limit_resume_after(0)
+
+        assert scheduler._state["task1"].rate_limit_paused is False
+        mock_client.chat_postMessage.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # TestRateLimitInExecuteTask
