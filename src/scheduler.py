@@ -421,17 +421,32 @@ class TaskScheduler:
             await asyncio.sleep(sleep_seconds)
 
             resumed_names = []
+            already_resumed = 0
             for task_id, task in self._tasks.items():
                 state = self._state.get(task_id)
                 if state is None:
                     continue
-                if state.rate_limit_paused:
-                    state.paused = False
+                if not state.rate_limit_paused:
+                    continue
+                # If the user manually resumed the task in the meantime,
+                # clear the stale flag but don't announce it as resumed.
+                if not state.paused:
                     state.rate_limit_paused = False
-                    state.consecutive_failures = 0
-                    resumed_names.append(task.name)
+                    already_resumed += 1
+                    continue
+                state.paused = False
+                state.rate_limit_paused = False
+                state.consecutive_failures = 0
+                resumed_names.append(task.name)
 
             self._save_state()
+
+            if already_resumed:
+                logger.info(
+                    "Rate limit resume: %d task(s) were already manually resumed; "
+                    "cleared stale rate_limit_paused flag without re-announcing.",
+                    already_resumed,
+                )
 
             if resumed_names:
                 msg = (
@@ -591,6 +606,9 @@ class TaskScheduler:
             return False
         state = self._state.setdefault(task_id, TaskState())
         state.paused = False
+        # Clear rate_limit_paused too, so the pending auto-resume timer
+        # doesn't later announce this task as "resumed" spuriously.
+        state.rate_limit_paused = False
         state.consecutive_failures = 0
         self._save_state()
         return True
