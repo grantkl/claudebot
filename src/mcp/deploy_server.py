@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
+import asyncio  # noqa: F401  (referenced by tests via patch)
 import json
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,9 +13,6 @@ from claude_agent_sdk import SdkMcpTool, tool
 logger = logging.getLogger(__name__)
 
 TRIGGER_FILE = "/app/data/deploy.trigger"
-RESULT_FILE = "/app/data/deploy.result"
-POLL_INTERVAL = 2
-POLL_TIMEOUT = 600
 
 
 def _text(text: str) -> dict[str, Any]:
@@ -29,7 +25,7 @@ def _error(text: str) -> dict[str, Any]:
 
 @tool(
     "trigger_deploy",
-    "Trigger a rebuild and deploy of the bot container. WARNING: The bot will go offline briefly during the rebuild. A trigger file is written and the tool polls for a result file to confirm completion.",
+    "Queue a rebuild and deploy of the bot container (fire-and-forget). Writes a trigger file and returns immediately; the deploy runs asynchronously and the user is DM'd with the outcome when it completes. WARNING: the bot will go offline briefly during the rebuild.",
     {
         "type": "object",
         "properties": {
@@ -42,32 +38,23 @@ def _error(text: str) -> dict[str, Any]:
 )
 async def trigger_deploy(args: dict[str, Any]) -> dict[str, Any]:
     try:
+        from src.claude_client import _current_user_id
+
         reason = args.get("reason", "")
-        trigger_data = {
+        trigger_data: dict[str, Any] = {
             "reason": reason,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        user_id = _current_user_id.get()
+        if user_id is not None:
+            trigger_data["user_id"] = user_id
 
         with open(TRIGGER_FILE, "w") as f:
             json.dump(trigger_data, f)
 
-        elapsed = 0
-        while elapsed < POLL_TIMEOUT:
-            await asyncio.sleep(POLL_INTERVAL)
-            elapsed += POLL_INTERVAL
-            if os.path.exists(RESULT_FILE):
-                with open(RESULT_FILE) as f:
-                    content = f.read()
-                # Clean up files
-                for path in (TRIGGER_FILE, RESULT_FILE):
-                    if os.path.exists(path):
-                        os.remove(path)
-                return _text(content)
-
-        # Timeout — clean up trigger file
-        if os.path.exists(TRIGGER_FILE):
-            os.remove(TRIGGER_FILE)
-        return _error("Deploy timeout: no result after {0}s.".format(POLL_TIMEOUT))
+        return _text(
+            "Deploy queued. You'll get a DM with the result when it completes."
+        )
     except Exception as e:
         return _error(f"Failed to trigger deploy: {e}")
 
