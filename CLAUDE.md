@@ -49,7 +49,7 @@ Three tiers, determined by `SUPERUSER_IDS` and `AUTHORIZED_USER_IDS` env vars. N
 
 | Tier | Model | MCP Servers | Blocked Tools | Rate Limited |
 |---|---|---|---|---|
-| Superuser | opus | sonos + homekit + gmail + calendar + scheduler + flights + flight_watch + seats_aero + stocks + web_search + shopping_list | None | No |
+| Superuser | opus | sonos + homekit + gmail + calendar + scheduler + flights + flight_watch + seats_aero + stocks + web_search + shopping_list + webull | None | No |
 | Authorized | sonnet | sonos + homekit + flights + flight_watch + scheduler + stocks + web_search + shopping_list | Bash, Read, Edit, Write, Glob, Grep | No |
 | Everyone else | haiku | stocks + web_search | Bash, Read, Edit, Write, Glob, Grep | Yes |
 
@@ -79,6 +79,7 @@ When `ENABLE_MCP=true`, MCP servers are built once at startup and selectively in
 - **Shopping List** — conditionally loaded when `SHOPPING_LIST_ENABLED=true`; manages a shared shopping list with JSON persistence and recipe storage. Available to superuser and authorized tiers. Tools: shopping_list_add, shopping_list_view, shopping_list_remove, shopping_list_check, shopping_list_uncheck, shopping_list_clear, recipe_save, recipe_list, recipe_view, recipe_delete.
 - **Stocks** — conditionally loaded when `STOCKS_ENABLED=true`; provides real-time stock quotes, options chains, technical indicators, and short squeeze analysis via yfinance + FINRA + optional Finnhub. No required API key (Finnhub is optional via `FINNHUB_API_KEY` for cross-reference). Available to all tiers. Tools: stock_quote, options_expirations, options_chain, stock_technicals, short_interest, short_volume, squeeze_score, squeeze_screener.
 - **Web Search** — conditionally loaded when `BRAVE_API_KEY` is set; web search via Brave Search API (`@modelcontextprotocol/server-brave-search`). Available to all tiers. Tools: brave_web_search.
+- **Webull** — conditionally loaded when `OPTIONS_TRADING_ENABLED=true`; places real-money options trades via a Webull HTTP bridge. Requires `OPTIONS_API_KEY`; optional `WEBULL_TRADE_URL` (default `http://host.docker.internal:8000`) and `MAX_OPTIONS_TRADE_USD` safety cap. Superuser-only (real money). Tools: options_buy, options_sell.
 
 ### Autonomous Task Scheduler
 
@@ -177,3 +178,7 @@ Required env vars: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`. All others are optional
 - `WEBHOOK_ENABLED` — set to `true` to enable the HTTP webhook server for external signal ingestion
 - `WEBHOOK_PORT` — port for the webhook server (default `8081`)
 - `WEBHOOK_SECRET` — Bearer token secret for authenticating webhook requests
+- `OPTIONS_TRADING_ENABLED` — set to `true` to enable the Webull options trading MCP (real money — superuser-only)
+- `OPTIONS_API_KEY` — API key for the Webull HTTP trade bridge
+- `WEBULL_TRADE_URL` — URL of the Webull HTTP trade bridge (default `http://host.docker.internal:8000`)
+- `MAX_OPTIONS_TRADE_USD` — optional dollar cap per options trade for safety
