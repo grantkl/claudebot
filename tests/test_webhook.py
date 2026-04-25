@@ -57,12 +57,35 @@ def _make_request(headers=None, body=None, body_error=False):
     return request
 
 
+def _build_app(config, claude_manager):
+    """Reset the router mock then build a fresh app, so call_args_list is per-test."""
+    from aiohttp import web
+    web.Application.reset_mock()
+    web.json_response.reset_mock()
+    app = create_webhook_app(config, claude_manager)
+    return app
+
+
+def _get_handler(app, path):
+    """Find the registered handler for a given POST path."""
+    add_post = app.router.add_post
+    for call in add_post.call_args_list:
+        if call.args and call.args[0] == path:
+            return call.args[1]
+    raise AssertionError(f"no handler registered for {path}")
+
+
 async def _call_handler(config, claude_manager, request):
     """Extract and call the POST /webhook/signal handler directly."""
-    app = create_webhook_app(config, claude_manager)
-    # The handler is registered via app.router.add_post; grab it from the call
-    add_post_call = app.router.add_post
-    handler = add_post_call.call_args[0][1]
+    app = _build_app(config, claude_manager)
+    handler = _get_handler(app, "/webhook/signal")
+    return await handler(request)
+
+
+async def _call_deploy_handler(config, claude_manager, request):
+    """Extract and call the POST /webhook/deploy-result handler directly."""
+    app = _build_app(config, claude_manager)
+    handler = _get_handler(app, "/webhook/deploy-result")
     return await handler(request)
 
 
@@ -455,3 +478,227 @@ class TestErrorHandling:
         from aiohttp import web
         call_args = web.json_response.call_args
         assert call_args[0][0]["response"] == "Here is the answer"
+
+
+# ---------------------------------------------------------------------------
+# TestDeployResult — POST /webhook/deploy-result
+# ---------------------------------------------------------------------------
+class TestDeployResult:
+    @pytest.mark.asyncio
+    async def test_missing_auth_header_returns_401(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={},
+            body={"user_id": "U1", "status": "success", "message": "all good"},
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await _call_deploy_handler(config, claude_manager, request)
+
+        from aiohttp import web
+        call_args = web.json_response.call_args
+        assert call_args[1]["status"] == 401
+        assert call_args[0][0]["error"] == "unauthorized"
+
+    @pytest.mark.asyncio
+    async def test_wrong_token_returns_401(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={"Authorization": "Bearer wrong-token"},
+            body={"user_id": "U1", "status": "success", "message": "all good"},
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await _call_deploy_handler(config, claude_manager, request)
+
+        from aiohttp import web
+        call_args = web.json_response.call_args
+        assert call_args[1]["status"] == 401
+
+    @pytest.mark.asyncio
+    async def test_success_payload_sends_dm(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={"Authorization": "Bearer test-secret"},
+            body={
+                "user_id": "U_OWNER",
+                "status": "success",
+                "message": "deployed claudebot at sha abc123",
+                "timestamp": "2026-04-20T12:00:00Z",
+            },
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            mock_instance = AsyncMock()
+            MockClient.return_value = mock_instance
+            await _call_deploy_handler(config, claude_manager, request)
+
+        mock_instance.chat_postMessage.assert_called_once()
+        call = mock_instance.chat_postMessage.call_args
+        assert call.kwargs["channel"] == "U_OWNER"
+        text = call.kwargs["text"]
+        assert "Deploy succeeded" in text
+        assert "deployed claudebot at sha abc123" in text
+
+        from aiohttp import web
+        resp_call = web.json_response.call_args
+        assert resp_call[0][0]["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_failure_payload_sends_dm(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={"Authorization": "Bearer test-secret"},
+            body={
+                "user_id": "U_OWNER",
+                "status": "failure",
+                "message": "build failed: pytest exit 1",
+            },
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            mock_instance = AsyncMock()
+            MockClient.return_value = mock_instance
+            await _call_deploy_handler(config, claude_manager, request)
+
+        mock_instance.chat_postMessage.assert_called_once()
+        call = mock_instance.chat_postMessage.call_args
+        assert call.kwargs["channel"] == "U_OWNER"
+        text = call.kwargs["text"]
+        assert "Deploy failed" in text
+        assert "build failed: pytest exit 1" in text
+
+        from aiohttp import web
+        resp_call = web.json_response.call_args
+        assert resp_call[0][0]["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_missing_user_id_returns_400(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={"Authorization": "Bearer test-secret"},
+            body={"status": "success", "message": "ok"},
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await _call_deploy_handler(config, claude_manager, request)
+
+        from aiohttp import web
+        call_args = web.json_response.call_args
+        assert call_args[1]["status"] == 400
+
+    @pytest.mark.asyncio
+    async def test_missing_status_returns_400(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={"Authorization": "Bearer test-secret"},
+            body={"user_id": "U1", "message": "ok"},
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await _call_deploy_handler(config, claude_manager, request)
+
+        from aiohttp import web
+        call_args = web.json_response.call_args
+        assert call_args[1]["status"] == 400
+
+    @pytest.mark.asyncio
+    async def test_missing_message_returns_400(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={"Authorization": "Bearer test-secret"},
+            body={"user_id": "U1", "status": "success"},
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await _call_deploy_handler(config, claude_manager, request)
+
+        from aiohttp import web
+        call_args = web.json_response.call_args
+        assert call_args[1]["status"] == 400
+
+    @pytest.mark.asyncio
+    async def test_invalid_status_returns_400(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={"Authorization": "Bearer test-secret"},
+            body={"user_id": "U1", "status": "weird", "message": "ok"},
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await _call_deploy_handler(config, claude_manager, request)
+
+        from aiohttp import web
+        call_args = web.json_response.call_args
+        assert call_args[1]["status"] == 400
+
+    @pytest.mark.asyncio
+    async def test_invalid_json_returns_400(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={"Authorization": "Bearer test-secret"},
+            body_error=True,
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await _call_deploy_handler(config, claude_manager, request)
+
+        from aiohttp import web
+        call_args = web.json_response.call_args
+        assert call_args[1]["status"] == 400
+
+    @pytest.mark.asyncio
+    async def test_slack_dm_failure_returns_graceful_error(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={"Authorization": "Bearer test-secret"},
+            body={"user_id": "U1", "status": "success", "message": "ok"},
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            mock_instance = AsyncMock()
+            mock_instance.chat_postMessage = AsyncMock(side_effect=RuntimeError("slack down"))
+            MockClient.return_value = mock_instance
+            # Should not raise — endpoint must handle Slack failure gracefully
+            await _call_deploy_handler(config, claude_manager, request)
+
+        from aiohttp import web
+        call_args = web.json_response.call_args
+        # Endpoint must respond (not crash). Either 200 (best-effort) or 500 (reported).
+        assert call_args[1].get("status") in (200, 500, None)
+        if call_args[1].get("status") == 500:
+            assert call_args[0][0]["ok"] is False
+        # Ensure we did try to send
+        mock_instance.chat_postMessage.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_does_not_invoke_claude_manager(self):
+        config = _make_config()
+        claude_manager = AsyncMock()
+        request = _make_request(
+            headers={"Authorization": "Bearer test-secret"},
+            body={"user_id": "U1", "status": "success", "message": "ok"},
+        )
+
+        with patch("src.webhook.AsyncWebClient") as MockClient:
+            MockClient.return_value = AsyncMock()
+            await _call_deploy_handler(config, claude_manager, request)
+
+        claude_manager.send_message.assert_not_called()

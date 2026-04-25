@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
 import logging
 import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
+
+# ContextVar tracking the user_id of the in-flight send_message call. Set at the
+# start of send_message and reset on exit. Used by tools (e.g., trigger_deploy)
+# that need to attribute actions to the requesting user without threading
+# user_id through every layer.
+_current_user_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_current_user_id", default=None
+)
 
 @dataclass
 class SendMessageResult:
@@ -98,6 +107,21 @@ class ClaudeManager:
         await self._remove_session(thread_ts)
 
     async def send_message(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, needed_servers: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None, user_name: str | None = None, _retry: bool = True) -> SendMessageResult:
+        _token = _current_user_id.set(user_id)
+        try:
+            return await self._send_message_impl(
+                thread_ts, text, thread_context=thread_context,
+                model=model, mcp_server_names=mcp_server_names,
+                needed_servers=needed_servers, images=images,
+                disallowed_tools=disallowed_tools, authorized=authorized,
+                superuser=superuser, user_id=user_id, user_name=user_name,
+                _retry=_retry,
+            )
+        finally:
+            _current_user_id.reset(_token)
+
+    async def _send_message_impl(self, thread_ts: str, text: str, thread_context: str | None = None, model: str | None = None, mcp_server_names: set[str] | None = None, needed_servers: set[str] | None = None, images: list[tuple[str, bytes]] | None = None, disallowed_tools: list[str] | None = None, authorized: bool = False, superuser: bool = False, user_id: str | None = None, user_name: str | None = None, _retry: bool = True) -> SendMessageResult:
+        """Body of send_message; wrapped by send_message to manage _current_user_id contextvar."""
         is_new_session = thread_ts not in self._sessions
         if is_new_session:
             system_prompt = self._config.claude_system_prompt

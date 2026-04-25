@@ -878,6 +878,97 @@ class TestClaudeManager:
         assert result.text == "Screenshot taken."
 
 
+class TestCurrentUserIdContextVar:
+    """Tests for the `_current_user_id` ContextVar in claude_client.
+
+    The contextvar should be set to the user_id at the start of send_message
+    and reset to None after send_message returns.
+    """
+
+    @pytest.mark.asyncio
+    async def test_contextvar_set_during_send_message(self):
+        from src.claude_client import _current_user_id
+
+        config = _make_config()
+        manager = ClaudeManager(config)
+
+        observed: dict[str, Any] = {}
+
+        async def _capture_query(*args, **kwargs):
+            observed["user_id"] = _current_user_id.get()
+
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        fake_client.query = AsyncMock(side_effect=_capture_query)
+
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello", user_id="U123")
+
+        assert observed["user_id"] == "U123"
+
+    @pytest.mark.asyncio
+    async def test_contextvar_reset_after_send_message(self):
+        from src.claude_client import _current_user_id
+
+        config = _make_config()
+        manager = ClaudeManager(config)
+
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello", user_id="U123")
+
+        assert _current_user_id.get() is None
+
+    @pytest.mark.asyncio
+    async def test_contextvar_reset_after_send_message_raises(self):
+        """Even if send_message raises, contextvar should be reset."""
+        from src.claude_client import _current_user_id
+
+        config = _make_config()
+        manager = ClaudeManager(config)
+
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.query = AsyncMock(side_effect=RuntimeError("boom"))
+
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            with pytest.raises(RuntimeError):
+                await manager.send_message("t1", "hello", user_id="U123")
+
+        assert _current_user_id.get() is None
+
+    @pytest.mark.asyncio
+    async def test_contextvar_none_when_user_id_not_provided(self):
+        from src.claude_client import _current_user_id
+
+        config = _make_config()
+        manager = ClaudeManager(config)
+
+        observed: dict[str, Any] = {}
+
+        async def _capture_query(*args, **kwargs):
+            observed["user_id"] = _current_user_id.get()
+
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="hi")]),
+            _FakeResultMessage(),
+        ])
+        fake_client.query = AsyncMock(side_effect=_capture_query)
+
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            await manager.send_message("t1", "hello")
+
+        assert observed["user_id"] is None
+
+
 def test_deploy_is_always_on():
     """Deploy MCP must stay enabled throughout the session — toggling it off
     breaks the trigger_deploy tool because SDK toggle calls don't reliably

@@ -111,6 +111,10 @@ tasks:
 
 When `WEBHOOK_ENABLED=true`, an optional HTTP webhook server starts on `WEBHOOK_PORT` (default `8081`) for external signal ingestion. External systems (e.g., monitoring alerts, CI/CD pipelines, IoT triggers) can send signals via `POST /webhook/signal` with Bearer token authentication (`WEBHOOK_SECRET`). The request body specifies a prompt and target Slack user IDs. The server reuses the existing tiered access model to determine which Claude model and MCP servers are available based on the target user's tier, then processes the prompt and DMs results to the specified users.
 
+### Deploy Flow
+
+When a user asks the bot to deploy, `trigger_deploy` writes `data/deploy.trigger` (with the calling user's Slack id) and returns immediately ("Deploy queued"). The deploy-watcher launchd daemon runs `scripts/deploy.sh`, which rebuilds the container and POSTs the result to the bot's `POST /webhook/deploy-result` endpoint. The webhook handler DMs the originating user the verbatim result — direct DM, not routed through Claude, so the bot can't fabricate a result.
+
 ## Git Workflow
 
 - The default branch is `master`. Always branch from and rebase onto `origin/master` before creating a PR: `git fetch origin master && git checkout -b feat/my-feature origin/master`

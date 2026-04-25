@@ -97,6 +97,47 @@ def create_webhook_app(config: Config, claude_manager: ClaudeManager) -> web.App
 
         return web.json_response({"ok": True, "response": response})
 
+    async def handle_deploy_result(request: web.Request) -> web.Response:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer ") or auth_header[7:] != config.webhook_secret:
+            return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "invalid JSON"}, status=400)
+
+        user_id = body.get("user_id")
+        status = body.get("status")
+        message = body.get("message")
+
+        if not user_id or not status or not message:
+            return web.json_response(
+                {"ok": False, "error": "missing required fields: user_id, status, message"},
+                status=400,
+            )
+
+        if status not in ("success", "failure"):
+            return web.json_response(
+                {"ok": False, "error": "status must be 'success' or 'failure'"},
+                status=400,
+            )
+
+        if status == "success":
+            text = f"Deploy succeeded.\n\n{message}"
+        else:
+            text = f"Deploy failed.\n\n{message}"
+
+        client = AsyncWebClient(token=config.slack_bot_token)
+        try:
+            await client.chat_postMessage(channel=user_id, text=text)
+        except Exception:
+            logger.exception("Failed to send deploy-result DM to %s", user_id)
+            return web.json_response({"ok": False, "error": "slack delivery failed"}, status=500)
+
+        return web.json_response({"ok": True})
+
     app = web.Application()
     app.router.add_post("/webhook/signal", handle_signal)
+    app.router.add_post("/webhook/deploy-result", handle_deploy_result)
     return app
