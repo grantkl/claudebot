@@ -35,11 +35,8 @@ except Exception:
         return
     fi
 
-    if [ -f "$PROJECT_DIR/.env" ]; then
-        set -a
-        # shellcheck disable=SC1091
-        source "$PROJECT_DIR/.env"
-        set +a
+    if [ -z "${WEBHOOK_SECRET:-}" ] && [ -f "$PROJECT_DIR/.env" ]; then
+        WEBHOOK_SECRET="$(grep -E '^WEBHOOK_SECRET=' "$PROJECT_DIR/.env" | head -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
     fi
 
     if [ -z "${WEBHOOK_SECRET:-}" ]; then
