@@ -16,6 +16,7 @@ sys.modules.setdefault("src.mcp.flight_watch_server", MagicMock())
 sys.modules.setdefault("src.mcp.stocks_server", MagicMock())
 sys.modules.setdefault("src.mcp.calendar_server", MagicMock())
 sys.modules.setdefault("src.mcp.deploy_server", MagicMock())
+sys.modules.setdefault("src.mcp.webull_server", MagicMock())
 
 from src.mcp import _resolve_amadeus_path, build_mcp_servers  # noqa: E402
 
@@ -188,3 +189,25 @@ class TestBuildMcpServersDeploy:
         os.environ.pop("DEPLOY_ENABLED", None)
         servers = build_mcp_servers()
         assert "deploy" not in servers
+
+
+class TestBuildMcpServersWebull:
+    @patch.dict("os.environ", {"OPTIONS_TRADING_ENABLED": "true"}, clear=False)
+    def test_webull_enabled(self):
+        """Webull tools are loaded when OPTIONS_TRADING_ENABLED=true."""
+        servers = build_mcp_servers()
+        assert "webull" in servers
+
+    @patch.dict("os.environ", {"OPTIONS_TRADING_ENABLED": "false"}, clear=False)
+    def test_webull_disabled(self):
+        """Webull tools are NOT loaded when OPTIONS_TRADING_ENABLED=false."""
+        servers = build_mcp_servers()
+        assert "webull" not in servers
+
+    @patch.dict("os.environ", {}, clear=False)
+    def test_webull_not_set_in_env(self):
+        """Webull tools are NOT loaded when OPTIONS_TRADING_ENABLED is not set."""
+        import os
+        os.environ.pop("OPTIONS_TRADING_ENABLED", None)
+        servers = build_mcp_servers()
+        assert "webull" not in servers

@@ -92,6 +92,10 @@ _SERVER_KEYWORD_RULES: list[tuple[set[str], re.Pattern[str]]] = [
         r"|\bporsche\b|\bcar flip\b|\bused car\b",
         re.IGNORECASE,
     )),
+    ({"webull"}, re.compile(
+        r"\boption(s)?\b|\bwebull\b|\bstrike\b|\b(call|put)s?\s+(option|contract)s?\b",
+        re.IGNORECASE,
+    )),
 ]
 
 

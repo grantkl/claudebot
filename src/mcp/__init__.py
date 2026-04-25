@@ -130,6 +130,11 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
         from .deploy_server import DEPLOY_TOOLS
         servers["deploy"] = create_sdk_mcp_server(name="deploy", version="1.0.0", tools=DEPLOY_TOOLS)
 
+    options_trading_enabled = os.environ.get("OPTIONS_TRADING_ENABLED", "").lower() in ("1", "true", "yes")
+    if options_trading_enabled:
+        from .webull_server import WEBULL_TOOLS
+        servers["webull"] = create_sdk_mcp_server(name="webull", version="1.0.0", tools=WEBULL_TOOLS)
+
     # web_search is handled as a built-in Claude tool (WebSearch/WebFetch),
     # not as an MCP server. See claude_client.py for how it's enabled via
     # allowed_tools when "web_search" is in mcp_server_names.

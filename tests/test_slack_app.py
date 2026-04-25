@@ -39,7 +39,7 @@ sys.modules.setdefault("claude_agent_sdk", MagicMock())
 sys.modules.setdefault("httpx", MagicMock())
 
 from src.rate_limiter import RATE_LIMIT_MESSAGE as RL_MESSAGE  # noqa: E402
-from src.slack_app import create_app  # noqa: E402
+from src.slack_app import classify_needed_servers, create_app  # noqa: E402
 
 def _mock_result(text, used_shopping_list_view=False):
     """Create a mock SendMessageResult."""
@@ -791,6 +791,11 @@ class TestSlackApp:
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
         claude_manager.has_session = MagicMock(return_value=True)
+        claude_manager.registered_mcp_server_names = {
+            "sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch",
+            "google_flights", "seats_aero", "fb_marketplace", "stocks", "web_search",
+            "shopping_list", "calendar", "memory",
+        }
         rate_limiter = _make_rate_limiter()
         say = AsyncMock()
         client = _make_client()
@@ -981,3 +986,79 @@ class TestShoppingListActionHandler:
             await handler(ack=ack, body=body, client=client)
 
         ack.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestWebullKeywordRouting
+# ---------------------------------------------------------------------------
+class TestWebullKeywordRouting:
+    """Tests for the webull / options-trading keyword routing rule.
+
+    Regex contract for the implementation agent:
+      The rule must map to {"webull"} and match (case-insensitive) any of:
+        - \\boption(s)?\\b
+        - \\bwebull\\b
+        - \\bstrike\\b
+        - \\b(call|put)s?\\s+(option|contract)s?\\b
+
+      It must NOT match a bare "call" or "put" with no options-context
+      qualifier ("call my mom", "put it down", etc.).
+    """
+
+    @pytest.mark.parametrize("text", [
+        "buy 1 SPY 700 call option",
+        "sell my puts options",
+        "place an options trade for AAPL",
+        "use webull to trade",
+        "Webull, please buy",
+        "what's the strike price on TSLA",
+        "I want to buy a put contract",
+        "buy 5 call contracts of NVDA",
+        "show me my options",
+        "open an option position",
+    ])
+    def test_options_phrases_route_to_webull(self, text):
+        needed = classify_needed_servers(text)
+        assert "webull" in needed, f"expected 'webull' in needed_servers for: {text!r}"
+
+    @pytest.mark.parametrize("text", [
+        "call my mom",
+        "give me a call later",
+        "put it down on the table",
+        "let's put a pin in this",
+        "hello world",
+        "what time is it",
+    ])
+    def test_non_options_phrases_do_not_route_to_webull(self, text):
+        needed = classify_needed_servers(text)
+        assert "webull" not in needed, f"did NOT expect 'webull' in needed_servers for: {text!r}"
+
+    @pytest.mark.asyncio
+    async def test_superuser_options_message_routes_webull(self):
+        """End-to-end: a superuser sending an options message has 'webull' in needed_servers."""
+        config = _make_config(authorized_user_ids={"U001"}, superuser_ids={"U001"})
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
+        claude_manager.has_session = MagicMock(return_value=True)
+        # Pretend the registered MCP set includes webull (superusers get all registered)
+        claude_manager.registered_mcp_server_names = {
+            "sonos", "homekit", "gmail", "scheduler", "flights", "flight_watch",
+            "google_flights", "seats_aero", "fb_marketplace", "stocks", "web_search",
+            "shopping_list", "calendar", "memory", "webull",
+        }
+        say = AsyncMock()
+        client = _make_client()
+
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+
+        event = _make_event(
+            user="U001",
+            text="<@B001> buy 1 SPY 700 call option on webull",
+        )
+        handler = app._handlers["app_mention"]
+        await handler(event=event, say=say, client=client)
+
+        call_kwargs = claude_manager.send_message.call_args.kwargs
+        needed_servers = call_kwargs["needed_servers"]
+        assert "webull" in needed_servers
