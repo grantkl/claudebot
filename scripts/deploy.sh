@@ -53,13 +53,24 @@ print(json.dumps({
     'timestamp': sys.argv[4],
 }))" "$user_id" "$status" "$message" "$timestamp")"
 
+    # Retry: docker compose up --build briefly takes the bot offline while
+    # the new container binds port 8081. Up to ~30s of retries.
     local curl_exit=0
-    curl -sS --max-time 10 -X POST \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer $WEBHOOK_SECRET" \
-        -d "$payload" \
-        "$WEBHOOK_URL" >/dev/null || curl_exit=$?
-    echo "$(date) - webhook notify exit=$curl_exit"
+    local attempt=0
+    while [ "$attempt" -lt 15 ]; do
+        curl_exit=0
+        curl -sS --max-time 5 -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $WEBHOOK_SECRET" \
+            -d "$payload" \
+            "$WEBHOOK_URL" >/dev/null || curl_exit=$?
+        if [ "$curl_exit" -eq 0 ]; then
+            break
+        fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+    echo "$(date) - webhook notify exit=$curl_exit attempts=$((attempt + 1))"
 }
 
 cleanup() {
