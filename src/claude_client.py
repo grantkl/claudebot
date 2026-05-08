@@ -326,6 +326,12 @@ class ClaudeManager:
                     mcp_servers=mcp_servers,
                     allowed_tools=allowed_tools,
                     disallowed_tools=disallowed_tools or [],
+                    # Load filesystem-based Anthropic Skills from .claude/skills/
+                    # at the project root (cwd). Progressive disclosure: only
+                    # frontmatter loads upfront; the body is fetched when the
+                    # model decides the skill applies.
+                    setting_sources=["project"],
+                    skills="all",
                 )
             )
             await client.connect()
