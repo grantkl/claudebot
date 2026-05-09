@@ -67,6 +67,10 @@ p.write_text(p.read_text().replace('seat=seat_type,', 'seat=seat_type.replace(\"
 COPY src/ src/
 RUN chmod -R a+rX src/
 
+# Copy Anthropic Agent Skills (loaded by claude-agent-sdk via setting_sources=["project"])
+COPY .claude/ .claude/
+RUN chmod -R a+rX .claude/
+
 # Create non-root user and switch to it
 RUN useradd --create-home appuser
 
