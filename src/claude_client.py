@@ -413,12 +413,20 @@ class ClaudeManager:
                 response_parts: list[str] = []
                 screenshot_paths: list[str] = []
                 used_shopping_list_view = False
+                tool_calls: list[str] = []
+                stop_reason: str | None = None
                 async for msg in entry.client.receive_response():
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if isinstance(block, TextBlock):
                                 response_parts.append(block.text)
                             elif isinstance(block, ToolUseBlock):
+                                input_summary = str(block.input)[:200]
+                                tool_calls.append(f"{block.name}({input_summary})")
+                                logger.info(
+                                    "Session %s tool_use: %s input=%s",
+                                    thread_ts, block.name, input_summary,
+                                )
                                 if "screenshot" in block.name.lower():
                                     fn = block.input.get("filename")
                                     if fn:
@@ -427,8 +435,13 @@ class ClaudeManager:
                                 elif "shopping_list_view" in block.name:
                                     used_shopping_list_view = True
                     elif isinstance(msg, ResultMessage):
+                        stop_reason = getattr(msg, "stop_reason", None)
                         break
                 text = "".join(response_parts)
+                logger.info(
+                    "Session %s response: %d chars, %d tool_calls=%s, stop_reason=%s",
+                    thread_ts, len(text), len(tool_calls), tool_calls or "[]", stop_reason,
+                )
                 if screenshot_paths:
                     unique = list(dict.fromkeys(screenshot_paths))
                     new_paths = [p for p in unique if p not in text]

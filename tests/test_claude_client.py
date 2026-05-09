@@ -969,6 +969,28 @@ class TestCurrentUserIdContextVar:
         assert observed["user_id"] is None
 
 
+class TestResponseLogging:
+    @pytest.mark.asyncio
+    async def test_tool_use_and_response_logged(self, caplog):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[
+                _FakeTextBlock(text="hello"),
+                _FakeToolUseBlock(name="ExitPlanMode", input={"plan": "do stuff"}),
+            ]),
+            _FakeResultMessage(stop_reason="end_turn"),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            with caplog.at_level("INFO", logger="src.claude_client"):
+                await manager.send_message("t1", "hi")
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("tool_use: ExitPlanMode" in m for m in messages)
+        assert any("response:" in m and "stop_reason=end_turn" in m for m in messages)
+
+
 def test_deploy_is_always_on():
     """Deploy MCP must stay enabled throughout the session — toggling it off
     breaks the trigger_deploy tool because SDK toggle calls don't reliably
