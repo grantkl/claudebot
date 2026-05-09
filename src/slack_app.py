@@ -249,15 +249,16 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             except Exception:
                 user_names[user_id] = user_id
 
-        logger.info("reactions_add hourglass: event_id=%s ts=%s", event_id, event_ts)
-        try:
-            await client.reactions_add(
-                name="hourglass_flowing_sand",
-                channel=event["channel"],
-                timestamp=event["ts"],
-            )
-        except Exception as exc:
-            logger.warning("reactions_add failed: event_id=%s ts=%s err=%s", event_id, event_ts, exc)
+        # Placeholder message — chat.update'd with the real reply when ready.
+        # This avoids the Slack client-side race where reaction-remove events
+        # render before the reply post does, creating a "no response" illusion.
+        placeholder_resp = await say(text="_…_", thread_ts=thread_ts)
+        placeholder_ts = placeholder_resp["ts"]
+        placeholder_channel = placeholder_resp.get("channel") or event["channel"]
+        logger.info(
+            "placeholder posted: event_id=%s placeholder_ts=%s channel=%s",
+            event_id, placeholder_ts, placeholder_channel,
+        )
 
         try:
             result = await claude_manager.send_message(
@@ -307,23 +308,24 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                 store = _get_store()
                 items = store.get_items()
                 blocks = build_shopping_list_blocks(items)
-                await say(text=post_text, blocks=blocks, thread_ts=thread_ts)
+                await client.chat_update(
+                    channel=placeholder_channel, ts=placeholder_ts,
+                    text=post_text or " ", blocks=blocks,
+                )
             else:
-                for chunk in split_message(post_text):
+                chunks = split_message(post_text) if post_text else []
+                first = chunks[0] if chunks else "_(no response)_"
+                await client.chat_update(
+                    channel=placeholder_channel, ts=placeholder_ts, text=first,
+                )
+                for chunk in chunks[1:]:
                     await say(text=chunk, thread_ts=thread_ts)
         except Exception as exc:
-            await say(text=format_error_message(exc), thread_ts=thread_ts)
+            await client.chat_update(
+                channel=placeholder_channel, ts=placeholder_ts,
+                text=format_error_message(exc),
+            )
             logger.exception("Error handling message in thread %s event_id=%s", thread_ts, event_id)
-        finally:
-            logger.info("reactions_remove hourglass (finally): event_id=%s ts=%s", event_id, event_ts)
-            try:
-                await client.reactions_remove(
-                    name="hourglass_flowing_sand",
-                    channel=event["channel"],
-                    timestamp=event["ts"],
-                )
-            except Exception as exc:
-                logger.warning("reactions_remove failed: event_id=%s ts=%s err=%s", event_id, event_ts, exc)
 
     @app.event("app_mention")
     async def handle_mention(event: dict[str, Any], say: Any, client: Any) -> None:
