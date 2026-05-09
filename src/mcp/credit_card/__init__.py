@@ -13,6 +13,12 @@ Modules:
 """
 
 from .catalog import Catalog, load_catalog
+from .email_parser import (
+    ParseError,
+    ParseResult,
+    ParsedTransaction,
+    parse_transaction_email,
+)
 from .engine import AuditResult, Recommendation, audit, recommend
 from .ledger import CreditLedger, period_key
 
@@ -20,9 +26,13 @@ __all__ = [
     "AuditResult",
     "Catalog",
     "CreditLedger",
+    "ParseError",
+    "ParseResult",
+    "ParsedTransaction",
     "Recommendation",
     "audit",
     "load_catalog",
+    "parse_transaction_email",
     "period_key",
     "recommend",
 ]

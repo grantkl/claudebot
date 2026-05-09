@@ -53,6 +53,7 @@ _credits_mark_used = credit_card_server.credits_mark_used.handler
 _cards_list = credit_card_server.cards_list.handler
 _cards_get = credit_card_server.cards_get.handler
 _merchant_categorize = credit_card_server.merchant_categorize.handler
+_parse_transaction_email = credit_card_server.parse_transaction_email.handler
 
 
 def _payload(result: dict[str, Any]) -> Any:
@@ -181,8 +182,48 @@ async def test_merchant_categorize() -> None:
 
 
 @pytest.mark.asyncio
+async def test_parse_transaction_email_success() -> None:
+    msg = {
+        "id": "msg_001",
+        "from": "Chase <no.reply.alerts@chase.com>",
+        "subject": "Your $42.10 transaction with TARGET 1234",
+        "date": "Mon, 05 May 2026 14:22:09 -0700",
+        "body": "<p>Account ending in 3253 was used.</p>",
+    }
+    result = await _parse_transaction_email({"message": msg})
+    payload = _payload(result)
+    assert payload["ok"] is True
+    tx = payload["transaction"]
+    assert tx["amount"] == 42.10
+    assert tx["card_last_4"] == "3253"
+    assert tx["merchant"] == "TARGET 1234"
+    assert tx["tx_id"] == "msg_001"
+
+
+@pytest.mark.asyncio
+async def test_parse_transaction_email_unknown_issuer() -> None:
+    msg = {
+        "id": "msg_002",
+        "from": "Discover <alerts@discover.com>",
+        "subject": "Transaction alert",
+        "date": "Mon, 05 May 2026 14:22:09 -0700",
+        "body": "A purchase of $42.00 was made at TARGET. Card ending in 9999.",
+    }
+    result = await _parse_transaction_email({"message": msg})
+    payload = _payload(result)
+    assert payload["ok"] is False
+    assert payload["error"]["reason"] == "unrecognized issuer"
+
+
+@pytest.mark.asyncio
+async def test_parse_transaction_email_rejects_non_object_message() -> None:
+    result = await _parse_transaction_email({"message": "not a dict"})
+    assert _is_error(result)
+
+
+@pytest.mark.asyncio
 async def test_credit_card_tools_export() -> None:
-    """The TOOLS list must include all 7 tools, in stable order."""
+    """The TOOLS list must include all 8 tools, in stable order."""
 
     names = [t.__name__ for t in credit_card_server.CREDIT_CARD_TOOLS]
     assert names == [
@@ -193,4 +234,5 @@ async def test_credit_card_tools_export() -> None:
         "cards_list",
         "cards_get",
         "merchant_categorize",
+        "parse_transaction_email",
     ]

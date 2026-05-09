@@ -12,6 +12,7 @@ Tools:
     cards_list           — read-only catalog dump.
     cards_get            — single-card lookup.
     merchant_categorize  — debug aid: show category + override match.
+    parse_transaction_email — extract {merchant, amount, last-4} from issuer alerts.
 """
 
 from __future__ import annotations
@@ -32,6 +33,10 @@ from .credit_card import (
 )
 from .credit_card.catalog import Catalog, Credit, reset_cache
 from .credit_card.categorize import categorize
+from .credit_card.email_parser import (
+    ParsedTransaction,
+    parse_transaction_email as _parse_transaction_email,
+)
 from .credit_card.ledger import (
     CreditLedger,
     get_ledger,
@@ -416,6 +421,45 @@ async def merchant_categorize(args: dict[str, Any]) -> dict[str, Any]:
         return _error(f"merchant_categorize failed: {e}")
 
 
+@tool(
+    "parse_transaction_email",
+    (
+        "Deterministically extract {merchant, amount, card_last_4, timestamp, tx_id} "
+        "from an issuer transaction-alert email. Input is the dict returned by "
+        "gmail_get_email (keys: id, from, subject, date, body). Supports Amex, "
+        "Chase, Bank of America (Alaska Visa), and FNBO (MGM Rewards). Always "
+        "returns JSON — never raises. On success: {ok: true, transaction: {...}}. "
+        "On failure: {ok: false, error: {reason, issuer, raw_subject, raw_excerpt, "
+        "fields_found}}. Output is drop-in compatible with card_audit transactions."
+    ),
+    {
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "object",
+                "description": (
+                    "Gmail message dict from gmail_get_email. Required keys: "
+                    "from, subject, date, body. Optional: id (used as tx_id)."
+                ),
+            },
+        },
+        "required": ["message"],
+    },
+)
+async def parse_transaction_email(args: dict[str, Any]) -> dict[str, Any]:
+    try:
+        message = args.get("message")
+        if not isinstance(message, dict):
+            return _error("parse_transaction_email: 'message' must be an object")
+        result = _parse_transaction_email(message)
+        if isinstance(result, ParsedTransaction):
+            return _json({"ok": True, "transaction": result.as_dict()})
+        return _json({"ok": False, "error": result.as_dict()})
+    except Exception as e:
+        logger.exception("parse_transaction_email failed")
+        return _error(f"parse_transaction_email failed: {e}")
+
+
 CREDIT_CARD_TOOLS: list[SdkMcpTool] = [
     whichcard,
     card_audit,
@@ -424,6 +468,7 @@ CREDIT_CARD_TOOLS: list[SdkMcpTool] = [
     cards_list,
     cards_get,
     merchant_categorize,
+    parse_transaction_email,
 ]
 
 
@@ -436,6 +481,7 @@ __all__ = [
     "credits_mark_used",
     "credits_status",
     "merchant_categorize",
+    "parse_transaction_email",
     "reset_cache",
     "reset_singleton",
     "whichcard",
