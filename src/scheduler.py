@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 NOTHING_TO_REPORT = "NOTHING_TO_REPORT"
 
-SUPERUSER_MCP_SERVERS = {"sonos", "homekit", "gmail", "calendar", "flights", "flight_watch", "seats_aero", "stocks", "web_search", "fb_marketplace", "memory"}
-AUTHORIZED_MCP_SERVERS = {"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search", "memory"}
+SUPERUSER_MCP_SERVERS = {"sonos", "homekit", "gmail", "calendar", "flights", "flight_watch", "seats_aero", "stocks", "web_search", "fb_marketplace", "memory", "credit_card"}
+AUTHORIZED_MCP_SERVERS = {"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search", "memory", "credit_card"}
 
 
 @dataclass
