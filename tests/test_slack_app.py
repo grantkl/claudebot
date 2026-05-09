@@ -70,13 +70,17 @@ def _make_rate_limiter(allowed=True):
 def _make_client():
     client = AsyncMock()
     client.auth_test = AsyncMock(return_value={"user_id": "B001"})
-    client.reactions_add = AsyncMock()
-    client.reactions_remove = AsyncMock()
     client.users_info = AsyncMock(return_value={
         "user": {"profile": {"display_name": "TestUser", "real_name": "Test User"}}
     })
     client.files_upload_v2 = AsyncMock()
+    client.chat_update = AsyncMock()
     return client
+
+
+def _make_say(placeholder_ts="P001", channel="C001"):
+    """A say() mock that returns the dict shape needed for placeholder edits."""
+    return AsyncMock(return_value={"ts": placeholder_ts, "channel": channel})
 
 
 def _make_event(**overrides):
@@ -131,7 +135,7 @@ class TestSlackApp:
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value=_mock_result("Claude response"))
         claude_manager.has_session = MagicMock(return_value=True)
-        say = AsyncMock()
+        say = _make_say()
         client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
@@ -141,12 +145,8 @@ class TestSlackApp:
         handler = app._handlers["app_mention"]
         await handler(event=event, say=say, client=client)
 
-        # Reaction added
-        client.reactions_add.assert_called_once_with(
-            name="hourglass_flowing_sand",
-            channel="C001",
-            timestamp=event["ts"],
-        )
+        # Placeholder posted
+        say.assert_called_once_with(text="_…_", thread_ts=event["ts"])
 
         # Claude called with stripped text and sonnet model for authorized user
         claude_manager.send_message.assert_called_once_with(
@@ -157,14 +157,9 @@ class TestSlackApp:
             user_name="TestUser",
         )
 
-        # Response posted
-        say.assert_called_once_with(text="Claude response", thread_ts=event["ts"])
-
-        # Reaction removed
-        client.reactions_remove.assert_called_once_with(
-            name="hourglass_flowing_sand",
-            channel="C001",
-            timestamp=event["ts"],
+        # Placeholder edited with response
+        client.chat_update.assert_called_once_with(
+            channel="C001", ts="P001", text="Claude response",
         )
 
     @pytest.mark.asyncio
@@ -196,7 +191,7 @@ class TestSlackApp:
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(side_effect=RuntimeError("boom"))
         claude_manager.has_session = MagicMock(return_value=True)
-        say = AsyncMock()
+        say = _make_say()
         client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
@@ -206,14 +201,12 @@ class TestSlackApp:
         handler = app._handlers["app_mention"]
         await handler(event=event, say=say, client=client)
 
-        # Error message posted (classified as internal/unknown error)
-        say.assert_called_once_with(
+        # Placeholder posted, then edited with the error message
+        say.assert_called_once_with(text="_…_", thread_ts=event["ts"])
+        client.chat_update.assert_called_once_with(
+            channel="C001", ts="P001",
             text="Something unexpected went wrong. The error has been logged.",
-            thread_ts=event["ts"],
         )
-
-        # Reaction still removed in finally block
-        client.reactions_remove.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_authorized_user_gets_sonnet_no_rate_limit(self):
@@ -664,7 +657,7 @@ class TestSlackApp:
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value=_mock_result(response_text))
         claude_manager.has_session = MagicMock(return_value=True)
-        say = AsyncMock()
+        say = _make_say()
         client = _make_client()
 
         with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
@@ -679,9 +672,9 @@ class TestSlackApp:
         assert upload_kwargs["channel"] == "C001"
         assert upload_kwargs["filename"] == "code.python"
 
-        # say should be called with placeholder text
-        say_text = say.call_args.kwargs["text"]
-        assert "[Code uploaded as file:" in say_text
+        # Placeholder edited with the "[Code uploaded as file: ...]" stub text
+        update_text = client.chat_update.call_args.kwargs["text"]
+        assert "[Code uploaded as file:" in update_text
 
     @pytest.mark.asyncio
     async def test_unauthorized_user_gets_filesystem_tools_blocked(self):
