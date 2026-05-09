@@ -135,6 +135,13 @@ def build_mcp_servers() -> dict[str, McpServerConfig]:
         from .webull_server import WEBULL_TOOLS
         servers["webull"] = create_sdk_mcp_server(name="webull", version="1.0.0", tools=WEBULL_TOOLS)
 
+    credit_card_enabled = os.environ.get("CREDIT_CARD_ENABLED", "").lower() in ("1", "true", "yes")
+    if credit_card_enabled:
+        from .credit_card_server import CREDIT_CARD_TOOLS
+        servers["credit_card"] = create_sdk_mcp_server(
+            name="credit_card", version="1.0.0", tools=CREDIT_CARD_TOOLS
+        )
+
     # web_search is handled as a built-in Claude tool (WebSearch/WebFetch),
     # not as an MCP server. See claude_client.py for how it's enabled via
     # allowed_tools when "web_search" is in mcp_server_names.

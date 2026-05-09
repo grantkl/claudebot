@@ -1,0 +1,327 @@
+# Default credit card catalog shipped with the credit_card MCP server.
+# This file is bundled with the Python module and lives in source control.
+# Override the path via the CREDIT_CARDS_CATALOG env var if you need a
+# user-specific catalog at runtime.
+#
+# Schema version is validated by catalog.py. Bump on breaking changes.
+version: 1
+
+# Cents per point/mile, used to convert raw earn rates into effective
+# cash-back-equivalent percentages.
+point_valuations:
+  amex_mr: 1.8
+  chase_ur: 1.8
+  delta_skymiles: 1.2
+  alaska_miles: 1.4
+  mgm_points: 1.0
+  cash: 1.0
+
+cards:
+  - id: amex_plat
+    name: "Amex Platinum"
+    issuer: amex
+    network: amex
+    annual_fee: 895
+    base_rate:
+      currency: amex_mr
+      points_per_dollar: 1
+    category_bonuses:
+      - { category: airline_direct, points_per_dollar: 5, notes: "Up to $500k/yr" }
+      - { category: hotel_amex_travel, points_per_dollar: 5 }
+    booking_channels:
+      hotel:
+        amex_travel: 5
+        fhr: 5
+        direct: 1
+        chase_travel: 1
+        third_party: 1
+      flight:
+        direct: 5
+        amex_travel: 5
+        chase_travel: 1
+        third_party: 1
+
+  - id: amex_delta_reserve
+    name: "Amex Delta SkyMiles Reserve"
+    issuer: amex
+    network: amex
+    annual_fee: 650
+    base_rate:
+      currency: delta_skymiles
+      points_per_dollar: 1
+    category_bonuses:
+      - { category: delta, points_per_dollar: 3 }
+
+  - id: csr
+    name: "Chase Sapphire Reserve"
+    issuer: chase
+    network: visa
+    annual_fee: 795
+    base_rate:
+      currency: chase_ur
+      points_per_dollar: 1
+    category_bonuses:
+      - { category: dining, points_per_dollar: 3 }
+      - { category: rideshare_lyft, points_per_dollar: 5, notes: "Through Sep 30 2027" }
+    booking_channels:
+      hotel:
+        chase_travel: 8
+        direct: 4
+        amex_travel: 1
+        third_party: 1
+      flight:
+        chase_travel: 8
+        direct: 4
+        amex_travel: 1
+        third_party: 1
+
+  - id: amazon_prime_visa
+    name: "Chase Amazon Prime Visa"
+    issuer: chase
+    network: visa
+    annual_fee: 0
+    base_rate:
+      currency: cash
+      points_per_dollar: 1
+    category_bonuses:
+      - { category: amazon, points_per_dollar: 5 }
+      - { category: gas, points_per_dollar: 2 }
+      - { category: dining, points_per_dollar: 2 }
+      - { category: transit, points_per_dollar: 2 }
+    booking_channels:
+      hotel:
+        chase_travel: 5
+      flight:
+        chase_travel: 5
+
+  - id: alaska_visa
+    name: "Alaska Airlines Visa Signature"
+    issuer: bofa
+    network: visa
+    annual_fee: 95
+    base_rate:
+      currency: alaska_miles
+      points_per_dollar: 1
+    category_bonuses:
+      - { category: alaska_air, points_per_dollar: 3 }
+      - { category: gas, points_per_dollar: 2 }
+      - { category: ev_charging, points_per_dollar: 2 }
+      - { category: streaming, points_per_dollar: 2 }
+      - { category: transit, points_per_dollar: 2 }
+      - { category: rideshare, points_per_dollar: 2 }
+
+  - id: apple_card
+    name: "Apple Card"
+    issuer: goldman
+    network: mastercard
+    annual_fee: 0
+    base_rate:
+      currency: cash
+      points_per_dollar: 1
+    # Apple Card uses apple_pay_partners table for 3% bonus rather than
+    # category_bonuses, since the bonus is conditional on Apple Pay use.
+
+  - id: mgm_mastercard
+    name: "MGM Rewards World Elite Mastercard"
+    issuer: fnbo
+    network: mastercard
+    annual_fee: 0
+    base_rate:
+      currency: mgm_points
+      points_per_dollar: 1
+    category_bonuses:
+      - { category: mgm_destinations, points_per_dollar: 3 }
+      - { category: gas, points_per_dollar: 2 }
+      - { category: grocery, points_per_dollar: 2 }
+
+# last-4 -> card_id, used by audit() to map transaction emails back to cards.
+last_4_map:
+  "1027": amex_plat
+  "3007": amex_delta_reserve
+  "3253": csr
+  "5502": amazon_prime_visa
+  "4365": alaska_visa
+  "8034": apple_card
+  "7337": mgm_mastercard
+
+# Recurring-credit overrides. When a charge matches one of these patterns and
+# the referenced credit_id has remaining capacity for the current period, the
+# override beats whatever earn-rate winner would otherwise be picked. This is
+# what makes "always charge Uber to Amex Plat" work even when Apple Card 3%
+# is technically higher raw rate.
+merchant_overrides:
+  - { merchant_pattern: "(?i)^uber( eats)?$", card_id: amex_plat, credit_id: amex_plat_uber_cash }
+  - { merchant_pattern: "(?i)^lyft$", card_id: csr, credit_id: csr_lyft }
+  - { merchant_pattern: "(?i)doordash", card_id: csr, credit_id: csr_doordash_restaurant }
+  - { merchant_pattern: "(?i)resy", card_id: amex_plat, credit_id: amex_plat_resy }
+  - { merchant_pattern: "(?i)walmart\\s*\\+|walmart plus", card_id: amex_plat, credit_id: amex_plat_walmart_plus }
+  - { merchant_pattern: "(?i)equinox", card_id: amex_plat, credit_id: amex_plat_equinox }
+  - { merchant_pattern: "(?i)^saks", card_id: amex_plat, credit_id: amex_plat_saks }
+  - { merchant_pattern: "(?i)peloton", card_id: csr, credit_id: csr_peloton }
+  - { merchant_pattern: "(?i)stubhub|viagogo", card_id: csr, credit_id: csr_stubhub }
+  - { merchant_pattern: "(?i)apple\\.com|app store|apple music|apple tv", card_id: apple_card }
+  - { merchant_pattern: "(?i)disney\\s*plus|hulu|peacock|paramount\\s*\\+|youtube tv|youtube premium|nytimes|wsj|espn\\s*\\+", card_id: amex_plat, credit_id: amex_plat_digital_entertainment }
+
+# Apple Pay 3% partner program. Only fires when apple_pay=true AND the card
+# could be Apple Card. End-dated entries automatically inert post-expiry.
+apple_pay_partners:
+  - { merchant_pattern: "(?i)^uber", rate: 0.03 }
+  - { merchant_pattern: "(?i)ace hardware", rate: 0.03 }
+  - { merchant_pattern: "(?i)booking\\.com", rate: 0.03 }
+  - { merchant_pattern: "(?i)chargepoint", rate: 0.03 }
+  - { merchant_pattern: "(?i)exxon|mobil", rate: 0.03 }
+  - { merchant_pattern: "(?i)hertz", rate: 0.03 }
+  - { merchant_pattern: "(?i)nike", rate: 0.03 }
+  - { merchant_pattern: "(?i)walgreens|duane reade", rate: 0.05, active_through: "2026-05-20", spend_cap: 500 }
+  - { merchant_pattern: "(?i)apple\\.com|app store|apple music|apple tv", rate: 0.03 }
+
+# Merchant -> category resolver. First match wins, evaluated top-down.
+# Place more specific patterns above more general ones.
+merchant_categories:
+  patterns:
+    - { regex: "(?i)delta air|^delta\\s", category: delta }
+    - { regex: "(?i)alaska air|hawaiian air", category: alaska_air }
+    - { regex: "(?i)united|american air|jetblue|southwest|spirit|frontier", category: airline_direct }
+    - { regex: "(?i)mgm|bellagio|aria|cosmopolitan|park mgm|excalibur|luxor|mandalay bay", category: mgm_destinations }
+    - { regex: "(?i)marriott|hilton|hyatt|ihg|holiday inn|crowne plaza|kimpton|westin|sheraton|four seasons|ritz", category: hotel_direct }
+    - { regex: "(?i)amazon|amzn|whole foods|amazon fresh", category: amazon }
+    - { regex: "(?i)trader joe|safeway|kroger|publix|wegmans|sprouts|aldi|ralph", category: grocery }
+    - { regex: "(?i)costco", category: grocery }
+    - { regex: "(?i)shell|chevron|bp |arco|texaco|76 |sunoco", category: gas }
+    - { regex: "(?i)chargepoint|evgo|electrify america|tesla supercharger", category: ev_charging }
+    - { regex: "(?i)netflix|hbo|max|disney|hulu|peacock|paramount|spotify|pandora|apple music|apple tv|youtube premium", category: streaming }
+    - { regex: "(?i)uber( eats)?$|uber\\b|^lyft", category: rideshare }
+    - { regex: "(?i)bart|caltrain|amtrak|metro|mta|wmata|metra|septa", category: transit }
+    - { regex: "(?i)restaurant|grill|pizza|cafe|coffee|starbucks|mcdonald|chipotle|panera|sushi|ramen|bistro|kitchen|tavern|bar &|bar and|brewing", category: dining }
+    - { regex: "(?i)doordash|grubhub|uber eats|seamless|caviar|postmates|instacart", category: dining }
+  mcc_overrides:
+    "5411": grocery
+    "5541": gas
+    "4111": transit
+    "4121": rideshare
+    "5812": dining
+    "5814": dining
+    "4511": airline_direct
+    "3000": airline_direct
+    "3500": hotel_direct
+    "7011": hotel_direct
+
+credits:
+  - id: amex_plat_uber_cash
+    card_id: amex_plat
+    name: "Uber Cash"
+    period: monthly
+    period_amount: 15
+    enrollment_required: false
+  - id: amex_plat_uber_one
+    card_id: amex_plat
+    name: "Uber One auto-credit"
+    period: monthly
+    period_amount: 10
+  - id: amex_plat_walmart_plus
+    card_id: amex_plat
+    name: "Walmart+ membership"
+    period: monthly
+    period_amount: 13
+  - id: amex_plat_digital_entertainment
+    card_id: amex_plat
+    name: "Digital entertainment (one of: Disney+, Hulu, Peacock, NYT, WSJ, ESPN+, Paramount+, YouTube)"
+    period: monthly
+    period_amount: 25
+    enrollment_required: true
+  - id: amex_plat_resy
+    card_id: amex_plat
+    name: "Resy dining credit"
+    period: quarterly
+    period_amount: 100
+    enrollment_required: true
+  - id: amex_plat_saks
+    card_id: amex_plat
+    name: "Saks Fifth Avenue"
+    period: semi_annual
+    period_amount: 50
+    enrollment_required: true
+  - id: amex_plat_equinox
+    card_id: amex_plat
+    name: "Equinox membership"
+    period: annual
+    period_amount: 300
+    enrollment_required: true
+  - id: amex_plat_clear
+    card_id: amex_plat
+    name: "CLEAR Plus"
+    period: annual
+    period_amount: 199
+  - id: amex_plat_airline_fee
+    card_id: amex_plat
+    name: "Airline fee credit (select airline)"
+    period: annual
+    period_amount: 200
+    enrollment_required: true
+  - id: amex_plat_prepaid_hotel
+    card_id: amex_plat
+    name: "Prepaid hotel credit (FHR/THC, 2+ nights)"
+    period: annual
+    period_amount: 200
+
+  - id: amex_delta_reserve_resy
+    card_id: amex_delta_reserve
+    name: "Resy dining"
+    period: monthly
+    period_amount: 20
+    enrollment_required: true
+  - id: amex_delta_reserve_rideshare
+    card_id: amex_delta_reserve
+    name: "Rideshare credit"
+    period: monthly
+    period_amount: 10
+    enrollment_required: true
+
+  - id: csr_lyft
+    card_id: csr
+    name: "Lyft credit"
+    period: monthly
+    period_amount: 10
+    active_through: "2027-09-30"
+  - id: csr_doordash_restaurant
+    card_id: csr
+    name: "DoorDash restaurant credit"
+    period: monthly
+    period_amount: 5
+  - id: csr_doordash_nonrestaurant_1
+    card_id: csr
+    name: "DoorDash non-restaurant credit (1)"
+    period: monthly
+    period_amount: 10
+  - id: csr_doordash_nonrestaurant_2
+    card_id: csr
+    name: "DoorDash non-restaurant credit (2)"
+    period: monthly
+    period_amount: 10
+  - id: csr_stubhub
+    card_id: csr
+    name: "StubHub/viagogo credit"
+    period: annual
+    period_amount: 300
+  - id: csr_exclusive_tables
+    card_id: csr
+    name: "Exclusive Tables dining credit"
+    period: annual
+    period_amount: 300
+  - id: csr_peloton
+    card_id: csr
+    name: "Peloton membership credit"
+    period: annual
+    period_amount: 120
+  - id: csr_edit_hotel
+    card_id: csr
+    name: "The Edit hotel credit"
+    period: annual
+    period_amount: 500
+
+  - id: alaska_companion_fare
+    card_id: alaska_visa
+    name: "Alaska $99 companion fare (after $6k spend)"
+    period: cardmember_year
+    period_amount: 99
+    cardmember_anchor_month: 1
