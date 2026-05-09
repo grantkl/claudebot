@@ -116,7 +116,15 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
     _SKIP_SUBTYPES = {"message_changed", "message_deleted", "message_replied", "channel_join", "channel_leave"}
 
     async def _handle_message(event: dict[str, Any], say: Any, client: Any) -> None:
+        event_ts = event.get("ts", "?")
+        event_id = event.get("client_msg_id") or event_ts
+        logger.info(
+            "_handle_message entered: event_id=%s ts=%s thread_ts=%s subtype=%s text=%r",
+            event_id, event_ts, event.get("thread_ts"), event.get("subtype"),
+            (event.get("text") or "")[:80],
+        )
         if event.get("bot_id") or event.get("subtype") in _SKIP_SUBTYPES:
+            logger.info("_handle_message skipped: event_id=%s reason=bot_or_subtype", event_id)
             return
 
         if bot_info["id"] is None:
@@ -241,11 +249,15 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             except Exception:
                 user_names[user_id] = user_id
 
-        await client.reactions_add(
-            name="hourglass_flowing_sand",
-            channel=event["channel"],
-            timestamp=event["ts"],
-        )
+        logger.info("reactions_add hourglass: event_id=%s ts=%s", event_id, event_ts)
+        try:
+            await client.reactions_add(
+                name="hourglass_flowing_sand",
+                channel=event["channel"],
+                timestamp=event["ts"],
+            )
+        except Exception as exc:
+            logger.warning("reactions_add failed: event_id=%s ts=%s err=%s", event_id, event_ts, exc)
 
         try:
             result = await claude_manager.send_message(
@@ -301,16 +313,17 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                     await say(text=chunk, thread_ts=thread_ts)
         except Exception as exc:
             await say(text=format_error_message(exc), thread_ts=thread_ts)
-            logger.exception("Error handling message in thread %s", thread_ts)
+            logger.exception("Error handling message in thread %s event_id=%s", thread_ts, event_id)
         finally:
+            logger.info("reactions_remove hourglass (finally): event_id=%s ts=%s", event_id, event_ts)
             try:
                 await client.reactions_remove(
                     name="hourglass_flowing_sand",
                     channel=event["channel"],
                     timestamp=event["ts"],
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("reactions_remove failed: event_id=%s ts=%s err=%s", event_id, event_ts, exc)
 
     @app.event("app_mention")
     async def handle_mention(event: dict[str, Any], say: Any, client: Any) -> None:
