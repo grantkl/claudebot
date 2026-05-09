@@ -45,6 +45,31 @@ logger = logging.getLogger(__name__)
 _ALWAYS_ON_SERVERS: set[str] = {"memory", "deploy"}
 
 
+def _format_ask_user_question(tool_input: dict) -> str:
+    """Render an AskUserQuestion tool input as Slack-friendly markdown.
+
+    The model emits this when it wants the user to pick from labeled options.
+    We surface it as text so the user can reply naturally on the next turn.
+    """
+    questions = tool_input.get("questions") or []
+    if not questions:
+        return ""
+    parts: list[str] = []
+    for q in questions:
+        header = q.get("header") or ""
+        question = q.get("question") or ""
+        line = f"*{header}* — {question}" if header else f"*{question}*"
+        parts.append(line)
+        for opt in q.get("options") or []:
+            label = opt.get("label") or ""
+            description = opt.get("description") or ""
+            if description:
+                parts.append(f"  • *{label}* — {description}")
+            else:
+                parts.append(f"  • *{label}*")
+    return "\n\n" + "\n".join(parts)
+
+
 @dataclass
 class SessionEntry:
     client: ClaudeSDKClient
@@ -427,7 +452,19 @@ class ClaudeManager:
                                     "Session %s tool_use: %s input=%s",
                                     thread_ts, block.name, input_summary,
                                 )
-                                if "screenshot" in block.name.lower():
+                                if block.name == "ExitPlanMode":
+                                    plan = block.input.get("plan", "")
+                                    if plan:
+                                        response_parts.append(
+                                            "\n\n*Plan ready for review:*\n\n"
+                                            + plan
+                                            + "\n\n_Reply to approve and proceed, or describe changes._"
+                                        )
+                                elif block.name == "AskUserQuestion":
+                                    formatted = _format_ask_user_question(block.input)
+                                    if formatted:
+                                        response_parts.append(formatted)
+                                elif "screenshot" in block.name.lower():
                                     fn = block.input.get("filename")
                                     if fn:
                                         abs_path = os.path.abspath(fn)

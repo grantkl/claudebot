@@ -991,6 +991,55 @@ class TestResponseLogging:
         assert any("response:" in m and "stop_reason=end_turn" in m for m in messages)
 
 
+class TestPlanModeSurfacing:
+    @pytest.mark.asyncio
+    async def test_exit_plan_mode_plan_appended_to_response(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        plan_md = "# Plan\n\n- step 1\n- step 2"
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[
+                _FakeTextBlock(text="Plan ready."),
+                _FakeToolUseBlock(name="ExitPlanMode", input={"plan": plan_md}),
+            ]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            result = await manager.send_message("t1", "do it")
+        assert "Plan ready." in result.text
+        assert plan_md in result.text
+        assert "Reply to approve" in result.text
+
+    @pytest.mark.asyncio
+    async def test_ask_user_question_rendered_to_response(self):
+        config = _make_config()
+        manager = ClaudeManager(config)
+        fake_client = _FakeClaudeSDKClient()
+        fake_client.set_responses([
+            _FakeAssistantMessage(content=[
+                _FakeToolUseBlock(name="AskUserQuestion", input={
+                    "questions": [{
+                        "header": "Fixtures",
+                        "question": "How to source email fixtures?",
+                        "options": [
+                            {"label": "Fetch real ones", "description": "Pull live samples"},
+                            {"label": "Synthetic", "description": "Generate fakes"},
+                        ],
+                    }],
+                }),
+            ]),
+            _FakeResultMessage(),
+        ])
+        with patch("src.claude_client.ClaudeSDKClient", return_value=fake_client):
+            result = await manager.send_message("t1", "go")
+        assert "Fixtures" in result.text
+        assert "How to source email fixtures?" in result.text
+        assert "Fetch real ones" in result.text
+        assert "Pull live samples" in result.text
+        assert "Synthetic" in result.text
+
+
 def test_deploy_is_always_on():
     """Deploy MCP must stay enabled throughout the session — toggling it off
     breaks the trigger_deploy tool because SDK toggle calls don't reliably
