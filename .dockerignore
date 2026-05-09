@@ -15,7 +15,6 @@ build/
 .idea/
 .vscode/
 .DS_Store
-.claude/
 .claude-container/
 logs/
 tests/
