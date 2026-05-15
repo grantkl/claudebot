@@ -1,8 +1,16 @@
 server {
     listen 8080;
 
+    # Use Docker's embedded DNS resolver with a short TTL so nginx
+    # re-resolves api.anthropic.com instead of caching one IP forever.
+    resolver 127.0.0.11 valid=30s ipv6=off;
+
     location / {
-        proxy_pass https://api.anthropic.com;
+        # A variable upstream forces nginx to re-resolve DNS at request
+        # time (per the resolver TTL), so a stale/bad IP self-heals in
+        # <=30s without a container restart.
+        set $upstream "api.anthropic.com";
+        proxy_pass https://$upstream;
         proxy_ssl_server_name on;
         proxy_set_header Host api.anthropic.com;
         proxy_set_header Authorization "Bearer ${CLAUDE_CODE_OAUTH_TOKEN}";
