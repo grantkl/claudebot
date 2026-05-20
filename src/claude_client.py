@@ -310,11 +310,20 @@ class ClaudeManager:
                     " start of conversations for relevant context about the user."
                 )
                 if user_id:
+                    # Lowercase the tag to match the stored-data convention.
+                    # All existing per-user memories are tagged lowercase; Slack
+                    # delivers user IDs uppercase, so without normalization the
+                    # prompt would instruct Claude to write/read with uppercase
+                    # and (depending on backend behavior) risk split or missed
+                    # results. The memory backend matches case-insensitively
+                    # today, but pinning the convention to lowercase keeps
+                    # stored data consistent.
+                    user_tag = user_id.lower()
                     system_prompt += (
                         f"\n\nMEMORY SCOPING: All memories are per-user. When storing memories,"
-                        f" ALWAYS include the tag '{user_id}' so memories are scoped to this user."
+                        f" ALWAYS include the tag '{user_tag}' so memories are scoped to this user."
                         f" When retrieving or searching memories, ALWAYS filter by the tag"
-                        f" '{user_id}' to only recall this user's memories."
+                        f" '{user_tag}' to only recall this user's memories."
                     )
             use_web_search = bool(mcp_server_names and "web_search" in mcp_server_names)
             if use_web_search:
