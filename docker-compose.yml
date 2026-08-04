@@ -8,10 +8,10 @@ services:
 
   memory:
     build:
-      context: https://github.com/doobidoo/mcp-memory-service.git
-      dockerfile: tools/docker/Dockerfile
+      context: ./memory
+      # Pinned to a specific PyPI release — bump MEMORY_VERSION in
+      # memory/Dockerfile (or override here with `args:`) to upgrade.
     restart: unless-stopped
-    entrypoint: ["/usr/local/bin/docker-entrypoint-unified.sh"]
     environment:
       - MCP_MODE=streamable-http
       - MCP_SSE_HOST=0.0.0.0
