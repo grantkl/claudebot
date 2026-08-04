@@ -6,8 +6,10 @@ import base64
 import json
 import logging
 import os
+from collections import defaultdict
 from html.parser import HTMLParser
 from typing import Any
+from urllib.parse import urlparse
 
 from claude_agent_sdk import SdkMcpTool, tool
 
@@ -102,6 +104,28 @@ def _extract_html(payload: dict[str, Any]) -> str:
     return ""
 
 
+# Email-marketing tracking-redirect URLs (host_suffix, path_prefixes). When an
+# email contains a tracker link AND a non-tracker link with the same visible
+# text, we drop the tracker so the model doesn't have to reproduce an opaque
+# 800+ char URL verbatim in a Slack alert.
+_TRACKER_MATCHERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (".redfin.com", ("/a/click", "/u/click")),
+)
+
+
+def _is_tracker_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    host = parsed.netloc.lower()
+    path = parsed.path
+    for host_suffix, path_prefixes in _TRACKER_MATCHERS:
+        if host.endswith(host_suffix) and any(path.startswith(p) for p in path_prefixes):
+            return True
+    return False
+
+
 class _LinkExtractor(HTMLParser):
     """Extract <a> tags with their href and visible text."""
 
@@ -139,10 +163,27 @@ def _extract_links(payload: dict[str, Any]) -> list[dict[str, str]]:
         return []
     parser = _LinkExtractor()
     parser.feed(html)
-    # Deduplicate by URL
+
+    # Group by normalized visible text so we can prefer a non-tracker sibling
+    # link over a giant tracking-redirect URL with the same label.
+    groups: dict[str, list[dict[str, str]]] = defaultdict(list)
+    order: list[str] = []
+    for link in parser.links:
+        key = link["text"].strip().lower()
+        if key not in groups:
+            order.append(key)
+        groups[key].append(link)
+
+    filtered: list[dict[str, str]] = []
+    for key in order:
+        group = groups[key]
+        non_trackers = [g for g in group if not _is_tracker_url(g["url"])]
+        filtered.extend(non_trackers if non_trackers else group)
+
+    # Deduplicate by URL, preserving order.
     seen: set[str] = set()
     unique: list[dict[str, str]] = []
-    for link in parser.links:
+    for link in filtered:
         if link["url"] not in seen:
             seen.add(link["url"])
             unique.append(link)
