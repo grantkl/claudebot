@@ -238,6 +238,7 @@ class TestTierLogic:
 
         call_kwargs = claude_manager.send_message.call_args.kwargs
         assert call_kwargs["mcp_server_names"] == SUPERUSER_MCP_SERVERS
+        assert call_kwargs["needed_servers"] == SUPERUSER_MCP_SERVERS
         assert call_kwargs["disallowed_tools"] is None
         assert call_kwargs["model"] == "opus"
         assert call_kwargs["superuser"] is True

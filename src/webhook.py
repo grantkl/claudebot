@@ -74,6 +74,7 @@ def create_webhook_app(config: Config, claude_manager: ClaudeManager) -> web.App
                 thread_ts, text,
                 model=model,
                 mcp_server_names=mcp_server_names,
+                needed_servers=mcp_server_names,
                 disallowed_tools=disallowed_tools,
                 authorized=authorized,
                 superuser=superuser,

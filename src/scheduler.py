@@ -247,6 +247,7 @@ class TaskScheduler:
                 prompt,
                 model=task.model,
                 mcp_server_names=mcp_server_names,
+                needed_servers=mcp_server_names,
                 authorized=authorized,
                 superuser=superuser,
             )
