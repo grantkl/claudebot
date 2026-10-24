@@ -232,6 +232,7 @@ class TestTaskExecution:
 
         call_kwargs = scheduler._claude_manager.send_message.call_args.kwargs
         assert call_kwargs["mcp_server_names"] == {"gmail"}
+        assert call_kwargs["needed_servers"] == {"gmail"}
 
     async def test_superuser_privileges(self, tmp_path):
         tasks = [_sample_task_data()]
