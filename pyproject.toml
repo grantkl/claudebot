@@ -5,7 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "slack-bolt>=1.21.0",
     "slack-sdk>=3.33.0",
-    "claude-agent-sdk>=0.1.0",
+    "claude-agent-sdk>=0.2.174,<0.3",
     "aiohttp>=3.9.0",
     "soco>=0.30.0",
     "aiohomekit>=3.2.0",
