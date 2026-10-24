@@ -884,7 +884,7 @@ class TestSqueezeScreener:
 class TestStocksToolsExport:
     def test_exports_all_tools(self) -> None:
         tools = stocks_server.STOCKS_TOOLS
-        assert len(tools) == 8
+        assert len(tools) == 9
         names = {t.name for t in tools}
         assert names == {
             "stock_quote",
@@ -895,6 +895,7 @@ class TestStocksToolsExport:
             "short_volume",
             "squeeze_score",
             "squeeze_screener",
+            "squeeze_candidates",
         }
 
     def test_tools_are_sdk_mcp_tool_instances(self) -> None:
