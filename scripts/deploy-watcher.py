@@ -3,6 +3,7 @@
 
 import json
 import os
+import signal
 import subprocess
 import time
 import urllib.request
@@ -14,6 +15,10 @@ DEPLOY_SCRIPT = os.path.join(SCRIPT_DIR, "deploy.sh")
 WEBHOOK_URL = "http://localhost:8081/webhook/deploy-result"
 POLL_INTERVAL = 2
 DEPLOY_TIMEOUT = 1800
+# Matches deploy.sh: the bot is briefly offline while a rebuilt container
+# binds port 8081, so retry the notify for up to ~30s.
+NOTIFY_ATTEMPTS = 15
+NOTIFY_RETRY_DELAY = 2
 
 
 def log(msg: str) -> None:
@@ -71,10 +76,35 @@ def notify_failure(message: str) -> None:
         },
         method="POST",
     )
-    try:
-        urllib.request.urlopen(request, timeout=10)
-    except OSError as exc:
-        log(f"Webhook notify failed: {exc}")
+    for attempt in range(1, NOTIFY_ATTEMPTS + 1):
+        try:
+            urllib.request.urlopen(request, timeout=5)
+            return
+        except OSError as exc:
+            log(f"Webhook notify attempt {attempt} failed: {exc}")
+        if attempt < NOTIFY_ATTEMPTS:
+            time.sleep(NOTIFY_RETRY_DELAY)
+
+
+def run_deploy(timeout: int) -> subprocess.CompletedProcess[str]:
+    """Like subprocess.run, but a timeout kills deploy.sh's whole process
+    group. subprocess.run only kills the direct child, which would leave
+    docker compose running and able to restart the bot after we report the
+    deploy as failed."""
+    with subprocess.Popen(
+        [DEPLOY_SCRIPT],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            os.killpg(proc.pid, signal.SIGKILL)
+            exc.stdout, exc.stderr = proc.communicate()
+            raise
+    return subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
 
 
 def handle_trigger() -> None:
@@ -84,12 +114,7 @@ def handle_trigger() -> None:
 
     log("Trigger file detected, starting deploy...")
     try:
-        result = subprocess.run(
-            [DEPLOY_SCRIPT],
-            capture_output=True,
-            text=True,
-            timeout=DEPLOY_TIMEOUT,
-        )
+        result = run_deploy(timeout=DEPLOY_TIMEOUT)
     except subprocess.TimeoutExpired as exc:
         log(f"Deploy timed out after {exc.timeout}s, killing")
         # Whatever the deploy managed to print before the kill is the only

@@ -7,7 +7,7 @@ These tests define the expected structure of the watcher script:
   deploy script and handle its outcome. ``main()`` is expected to call it in a
   loop with a sleep between iterations. Nothing here calls ``main()``.
 * ``DEPLOY_TIMEOUT`` — module-level constant holding the subprocess timeout in
-  seconds (1800), passed to ``subprocess.run(..., timeout=DEPLOY_TIMEOUT)``.
+  seconds (1800), passed to ``run_deploy(timeout=DEPLOY_TIMEOUT)``.
 * ``log(msg)`` — module-level logging helper. Tests patch it to capture output,
   so timeout diagnostics must go through it.
 * The timeout notification must be sent with ``urllib.request.urlopen`` (so the
@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import types
@@ -98,17 +99,17 @@ class TestDeployTimeout:
         """The deploy timeout is 30 minutes, exposed as a module constant."""
         assert watcher.DEPLOY_TIMEOUT == 1800
 
-    def test_subprocess_run_receives_1800(
+    def test_run_deploy_receives_1800(
         self, watcher: types.ModuleType, trigger_file: Path
     ) -> None:
-        """subprocess.run is called with the 1800s timeout."""
+        """run_deploy is called with the 1800s timeout."""
         completed = subprocess.CompletedProcess(
             args=["deploy.sh"], returncode=0, stdout="ok", stderr=""
         )
         with (
             patch.object(watcher, "TRIGGER_FILE", str(trigger_file)),
             patch.object(watcher, "log"),
-            patch.object(watcher.subprocess, "run", return_value=completed) as mock_run,
+            patch.object(watcher, "run_deploy", return_value=completed) as mock_run,
         ):
             watcher.handle_trigger()
 
@@ -133,7 +134,7 @@ class TestTimeoutHandling:
             patch.object(watcher, "PROJECT_DIR", str(trigger_file.parent)),
             patch.object(watcher, "log") as mock_log,
             patch.object(
-                watcher.subprocess, "run", side_effect=exc or _timeout_exc()
+                watcher, "run_deploy", side_effect=exc or _timeout_exc()
             ),
             patch("urllib.request.urlopen") as mock_urlopen,
         ):
@@ -220,7 +221,7 @@ class TestTimeoutHandling:
             patch.object(watcher, "TRIGGER_FILE", str(trigger_file)),
             patch.object(watcher, "PROJECT_DIR", str(trigger_file.parent)),
             patch.object(watcher, "log"),
-            patch.object(watcher.subprocess, "run", side_effect=_timeout_exc()),
+            patch.object(watcher, "run_deploy", side_effect=_timeout_exc()),
             patch("urllib.request.urlopen", side_effect=_record) as mock_urlopen,
         ):
             watcher.handle_trigger()
@@ -237,12 +238,90 @@ class TestTimeoutHandling:
             patch.object(watcher, "TRIGGER_FILE", str(trigger_file)),
             patch.object(watcher, "PROJECT_DIR", str(trigger_file.parent)),
             patch.object(watcher, "log"),
-            patch.object(watcher.subprocess, "run", side_effect=_timeout_exc()),
+            patch.object(watcher, "run_deploy", side_effect=_timeout_exc()),
             patch("urllib.request.urlopen", side_effect=OSError("connection refused")),
+            patch.object(watcher.time, "sleep"),
         ):
             watcher.handle_trigger()
 
         assert not trigger_file.exists()
+
+    def test_notify_retries_until_webhook_is_back(
+        self, watcher: types.ModuleType, trigger_file: Path
+    ) -> None:
+        """The bot may be mid-restart when the timeout fires, so a refused
+        connection is retried rather than dropping the DM."""
+        with (
+            patch.object(watcher, "TRIGGER_FILE", str(trigger_file)),
+            patch.object(watcher, "PROJECT_DIR", str(trigger_file.parent)),
+            patch.object(watcher, "log"),
+            patch.object(watcher, "run_deploy", side_effect=_timeout_exc()),
+            patch(
+                "urllib.request.urlopen",
+                side_effect=[OSError("refused"), OSError("refused"), MagicMock()],
+            ) as mock_urlopen,
+            patch.object(watcher.time, "sleep") as mock_sleep,
+        ):
+            watcher.handle_trigger()
+
+        assert mock_urlopen.call_count == 3
+        assert mock_sleep.call_count == 2
+
+    def test_notify_gives_up_after_max_attempts(
+        self, watcher: types.ModuleType, trigger_file: Path
+    ) -> None:
+        with (
+            patch.object(watcher, "TRIGGER_FILE", str(trigger_file)),
+            patch.object(watcher, "PROJECT_DIR", str(trigger_file.parent)),
+            patch.object(watcher, "log"),
+            patch.object(watcher, "run_deploy", side_effect=_timeout_exc()),
+            patch("urllib.request.urlopen", side_effect=OSError("refused")) as mock_urlopen,
+            patch.object(watcher.time, "sleep"),
+        ):
+            watcher.handle_trigger()
+
+        assert mock_urlopen.call_count == watcher.NOTIFY_ATTEMPTS
+
+
+# ---------------------------------------------------------------------------
+# run_deploy against a real subprocess
+# ---------------------------------------------------------------------------
+class TestRunDeploy:
+    def _script(self, tmp_path: Path, body: str) -> Path:
+        script = tmp_path / "deploy.sh"
+        script.write_text("#!/bin/bash\n" + body)
+        script.chmod(0o755)
+        return script
+
+    def test_timeout_kills_grandchildren(
+        self, watcher: types.ModuleType, tmp_path: Path
+    ) -> None:
+        """A hung docker compose is a grandchild of the watcher; it must die
+        with deploy.sh rather than keep running unowned."""
+        pid_file = tmp_path / "child.pid"
+        script = self._script(
+            tmp_path, f"sleep 60 &\necho $! > {pid_file}\necho started\nwait\n"
+        )
+        with patch.object(watcher, "DEPLOY_SCRIPT", str(script)):
+            with pytest.raises(subprocess.TimeoutExpired) as excinfo:
+                watcher.run_deploy(timeout=1)
+
+        child_pid = int(pid_file.read_text())
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+        # Partial output comes back as text, not bytes, so it logs readably.
+        assert excinfo.value.stdout == "started\n"
+
+    def test_returns_completed_process(
+        self, watcher: types.ModuleType, tmp_path: Path
+    ) -> None:
+        script = self._script(tmp_path, "echo out\necho err >&2\nexit 3\n")
+        with patch.object(watcher, "DEPLOY_SCRIPT", str(script)):
+            result = watcher.run_deploy(timeout=10)
+
+        assert result.returncode == 3
+        assert result.stdout == "out\n"
+        assert result.stderr == "err\n"
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +335,7 @@ class TestWebhookSecretResolution:
             patch.object(watcher, "TRIGGER_FILE", str(trigger_file)),
             patch.object(watcher, "PROJECT_DIR", str(trigger_file.parent)),
             patch.object(watcher, "log"),
-            patch.object(watcher.subprocess, "run", side_effect=_timeout_exc()),
+            patch.object(watcher, "run_deploy", side_effect=_timeout_exc()),
             patch("urllib.request.urlopen") as mock_urlopen,
         ):
             watcher.handle_trigger()
@@ -311,7 +390,7 @@ class TestNonTimeoutPaths:
         with (
             patch.object(watcher, "TRIGGER_FILE", str(missing)),
             patch.object(watcher, "log"),
-            patch.object(watcher.subprocess, "run") as mock_run,
+            patch.object(watcher, "run_deploy") as mock_run,
             patch("urllib.request.urlopen") as mock_urlopen,
         ):
             watcher.handle_trigger()
@@ -331,7 +410,7 @@ class TestNonTimeoutPaths:
             patch.object(watcher, "TRIGGER_FILE", str(trigger_file)),
             patch.object(watcher, "PROJECT_DIR", str(trigger_file.parent)),
             patch.object(watcher, "log"),
-            patch.object(watcher.subprocess, "run", return_value=completed),
+            patch.object(watcher, "run_deploy", return_value=completed),
             patch("urllib.request.urlopen") as mock_urlopen,
         ):
             watcher.handle_trigger()
@@ -350,7 +429,7 @@ class TestNonTimeoutPaths:
             patch.object(watcher, "TRIGGER_FILE", str(trigger_file)),
             patch.object(watcher, "PROJECT_DIR", str(trigger_file.parent)),
             patch.object(watcher, "log"),
-            patch.object(watcher.subprocess, "run", return_value=completed),
+            patch.object(watcher, "run_deploy", return_value=completed),
             patch("urllib.request.urlopen"),
         ):
             watcher.handle_trigger()
