@@ -37,6 +37,21 @@ def _error(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "is_error": True}
 
 
+def _requester() -> str | None:
+    """Slack user ID of the user whose turn is calling the tool.
+
+    Ownership comes from the real requester, never from tool arguments.
+    """
+    from ..claude_client import current_user_id
+
+    return current_user_id()
+
+
+def _manage(scheduler: TaskScheduler, task_id: str) -> None:
+    """Raise PermissionError unless the requester may manage *task_id*."""
+    scheduler.check_can_manage(task_id, _requester())
+
+
 @tool(
     "scheduler_list_tasks",
     "List all scheduled tasks with their status, schedule, and next run time.",
@@ -92,15 +107,17 @@ async def scheduler_get_task(args: dict[str, Any]) -> dict[str, Any]:
             "output": {"type": "string", "enum": ["dm", "silent"], "description": "Output mode: 'dm' sends results as Slack DM, 'silent' discards output."},
             "model": {"type": "string", "description": "Claude model to use (default: sonnet)."},
             "run_once": {"type": "boolean", "description": "If true, the task will auto-disable after its first successful execution. Use for one-time tasks."},
-            "created_by": {"type": "string", "description": "Slack user ID of the task creator. Required for permission validation."},
         },
-        "required": ["id", "name", "prompt", "created_by"],
+        "required": ["id", "name", "prompt"],
     },
 )
 async def scheduler_add_task(args: dict[str, Any]) -> dict[str, Any]:
     try:
         scheduler = _get_scheduler()
-        task = scheduler.add_task(args)
+        requester = _requester()
+        if requester is None:
+            return _error("Failed to add task: cannot determine the requesting user.")
+        task = scheduler.add_task({**args, "created_by": requester})
         return _text(f"Task '{task.id}' created successfully.")
     except Exception as e:
         return _error(f"Failed to add task: {e}")
@@ -126,7 +143,6 @@ async def scheduler_add_task(args: dict[str, Any]) -> dict[str, Any]:
             "model": {"type": "string"},
             "enabled": {"type": "boolean"},
             "run_once": {"type": "boolean", "description": "If true, the task will auto-disable after its first successful execution."},
-            "created_by": {"type": "string", "description": "Slack user ID of the task owner (for ownership transfer)."},
         },
         "required": ["task_id"],
     },
@@ -135,6 +151,7 @@ async def scheduler_update_task(args: dict[str, Any]) -> dict[str, Any]:
     try:
         scheduler = _get_scheduler()
         task_id = args.pop("task_id")
+        _manage(scheduler, task_id)
         if not scheduler.update_task(task_id, args):
             return _error(f"Task not found: {task_id}")
         return _text(f"Task '{task_id}' updated successfully.")
@@ -156,6 +173,7 @@ async def scheduler_update_task(args: dict[str, Any]) -> dict[str, Any]:
 async def scheduler_remove_task(args: dict[str, Any]) -> dict[str, Any]:
     try:
         scheduler = _get_scheduler()
+        _manage(scheduler, args["task_id"])
         if not scheduler.remove_task(args["task_id"]):
             return _error(f"Task not found: {args['task_id']}")
         return _text(f"Task '{args['task_id']}' removed successfully.")
@@ -177,6 +195,7 @@ async def scheduler_remove_task(args: dict[str, Any]) -> dict[str, Any]:
 async def scheduler_pause_task(args: dict[str, Any]) -> dict[str, Any]:
     try:
         scheduler = _get_scheduler()
+        _manage(scheduler, args["task_id"])
         if not scheduler.pause_task(args["task_id"]):
             return _error(f"Task not found: {args['task_id']}")
         return _text(f"Task '{args['task_id']}' paused.")
@@ -198,6 +217,7 @@ async def scheduler_pause_task(args: dict[str, Any]) -> dict[str, Any]:
 async def scheduler_resume_task(args: dict[str, Any]) -> dict[str, Any]:
     try:
         scheduler = _get_scheduler()
+        _manage(scheduler, args["task_id"])
         if not scheduler.resume_task(args["task_id"]):
             return _error(f"Task not found: {args['task_id']}")
         return _text(f"Task '{args['task_id']}' resumed.")
@@ -219,6 +239,7 @@ async def scheduler_resume_task(args: dict[str, Any]) -> dict[str, Any]:
 async def scheduler_trigger_task(args: dict[str, Any]) -> dict[str, Any]:
     try:
         scheduler = _get_scheduler()
+        _manage(scheduler, args["task_id"])
         if not await scheduler.trigger_task(args["task_id"]):
             return _error(f"Task not found: {args['task_id']}")
         return _text(f"Task '{args['task_id']}' triggered for immediate execution.")

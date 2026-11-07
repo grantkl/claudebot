@@ -21,6 +21,23 @@ sys.modules.setdefault("src.mcp.webull_server", MagicMock())
 from src.mcp import _resolve_amadeus_path, build_mcp_servers  # noqa: E402
 
 
+class TestBuildMcpServersMemory:
+    @patch.dict("os.environ", {"MEMORY_MCP_URL": "http://memory:8765/mcp"}, clear=False)
+    def test_memory_is_in_process_proxy_not_direct_http(self):
+        """The shared memory server must never be handed to sessions directly;
+        sessions get the per-user scoping proxy instead."""
+        servers = build_mcp_servers()
+        assert "memory" in servers
+        mem = servers["memory"]
+        assert not (isinstance(mem, dict) and mem.get("type") == "http")
+
+    @patch.dict("os.environ", {}, clear=False)
+    def test_memory_absent_without_url(self):
+        import os
+        os.environ.pop("MEMORY_MCP_URL", None)
+        assert "memory" not in build_mcp_servers()
+
+
 class TestBuildMcpServersFlights:
     @patch("src.mcp._resolve_amadeus_path", return_value="/usr/lib/node_modules/@privilegemendes/amadeus-mcp-server/dist/index.js")
     @patch.dict("os.environ", {"FLIGHTS_ENABLED": "true", "AMADEUS_CLIENT_ID": "test-id", "AMADEUS_CLIENT_SECRET": "test-secret"}, clear=False)

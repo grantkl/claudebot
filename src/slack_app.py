@@ -9,7 +9,13 @@ from typing import Any
 import httpx
 from slack_bolt.async_app import AsyncApp
 
-from .authorized_users import is_authorized, is_superuser
+from .authorized_users import (
+    AUTHORIZED_MCP_SERVERS,
+    EVERYONE_MCP_SERVERS,
+    FILESYSTEM_TOOLS,
+    is_authorized,
+    is_superuser,
+)
 from .mcp.shopping_list_server import _get_store, build_shopping_list_blocks
 from .claude_client import ClaudeManager
 from .config import Config
@@ -149,7 +155,7 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
         if superuser:
             disallowed_tools = None
         else:
-            disallowed_tools = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
+            disallowed_tools = list(FILESYSTEM_TOOLS)
 
         # Determine the full set of servers this user is *allowed* to use
         # (authorization gate — unchanged from before).
@@ -157,9 +163,9 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             # Superusers get every registered MCP — no allowlist maintenance.
             mcp_server_names: set[str] = claude_manager.registered_mcp_server_names
         elif authorized:
-            mcp_server_names = {"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list", "memory"}
+            mcp_server_names = set(AUTHORIZED_MCP_SERVERS)
         else:
-            mcp_server_names = {"stocks", "web_search"}
+            mcp_server_names = set(EVERYONE_MCP_SERVERS)
 
         # Lazy loading: only enable servers whose tools are relevant to
         # this particular message.  The full authorized set is still passed
@@ -235,10 +241,9 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
             if files_content:
                 cleaned_text += "\n\n" + format_file_attachments(files_content)
 
-        if not authorized and claude_manager.is_authorized_session(thread_ts):
-            await claude_manager.remove_session(thread_ts)
-        elif authorized and not superuser and claude_manager.is_superuser_session(thread_ts):
-            await claude_manager.remove_session(thread_ts)
+        # Tier-mismatch eviction happens inside send_message, under the
+        # session lock, so a lower-tier message can never run in (or tear
+        # down an in-flight turn of) a higher-tier session.
 
         user_id = event["user"]
         if user_id not in user_names:
@@ -287,8 +292,13 @@ def create_app(config: Config, claude_manager: ClaudeManager, rate_limiter: Rate
                 )
             post_text = modified_text if code_blocks else response
 
-            # Extract and upload screenshot images
-            modified_text2, image_files = extract_image_paths(post_text)
+            # Extract and upload screenshot images. Opening a path from the
+            # reply is a file read, so only superusers (who have Read and the
+            # Playwright CLI anyway) get it; other tiers keep the path as text.
+            if superuser:
+                modified_text2, image_files = extract_image_paths(post_text)
+            else:
+                modified_text2, image_files = post_text, []
             for img in image_files:
                 try:
                     with open(img.path, "rb") as f:

@@ -38,8 +38,8 @@ Slack Event (mention or DM)
   → slack_app._handle_message()
   → Three-tier auth check (is_superuser → is_authorized → everyone)
   → If not authorized: rate limit check
-  → Session eviction if tier mismatch (lower-tier user in higher-tier thread)
   → ClaudeManager.send_message(thread_ts, text, model, mcp_server_names, disallowed_tools)
+      (under the session lock: evict + recreate the session if its tier differs from the caller's)
   → Response split at 3900 chars → Slack reply
 ```
 
@@ -53,11 +53,15 @@ Three tiers, determined by `SUPERUSER_IDS` and `AUTHORIZED_USER_IDS` env vars. N
 | Authorized | sonnet | sonos + homekit + flights + flight_watch + scheduler + stocks + web_search + shopping_list | Bash, Read, Edit, Write, Glob, Grep | No |
 | Everyone else | haiku | stocks + web_search | Bash, Read, Edit, Write, Glob, Grep | Yes |
 
-**Security:** Non-superuser tiers have filesystem tools blocked to prevent capability discovery (e.g., reading source code to find that Gmail MCP exists). When a session has fewer MCP servers than what's available globally, a generic system prompt instructs Claude not to mention or suggest unavailable capabilities. Session eviction prevents a lower-tier user from inheriting a higher-tier session in the same thread.
+The per-tier server sets (`AUTHORIZED_MCP_SERVERS`, `EVERYONE_MCP_SERVERS`) and `FILESYSTEM_TOOLS` live in `src/authorized_users.py` and are shared by Slack and the scheduler. Superusers get every registered server. Authorized users also get `google_flights` and `memory` (per-user proxy).
+
+**Security:** Non-superuser tiers have filesystem tools blocked to prevent capability discovery (e.g., reading source code to find that Gmail MCP exists); this also applies to scheduled tasks owned by non-superusers. When a session has fewer MCP servers than what's available globally, a generic system prompt instructs Claude not to mention or suggest unavailable capabilities. Session eviction prevents a lower-tier user from inheriting a higher-tier session in the same thread. Absolute image paths in a reply are only opened and uploaded to Slack for superusers (Playwright screenshots); other tiers see the path as text.
 
 ### Per-Thread Sessions
 
-Claude sessions are keyed by Slack `thread_ts`, not by user. The same thread shares a single Claude conversation context. Sessions are auto-evicted after `SESSION_TTL_SECONDS` (default 1 hour) by a background cleanup loop. Each session has its own `asyncio.Lock` to prevent concurrent message handling.
+Claude sessions are keyed by Slack `thread_ts`, not by user. The same thread shares a single Claude conversation context. Sessions are auto-evicted after `SESSION_TTL_SECONDS` (default 1 hour) by a background cleanup loop. Each session has its own `asyncio.Lock` to prevent concurrent message handling. `send_message` checks the session's tier against the caller's under that lock and evicts/recreates on mismatch; every eviction (`remove_session`, TTL cleanup, error retry) takes the lock first, so it never tears down another user's in-flight turn, and it only unregisters the exact session it holds.
+
+Tools that act for a user read `current_user_id()` (claude_client.py), which reports the user of the session's in-flight turn. Don't read the `_current_user_id` contextvar directly from tools: SDK tool handlers run in a task spawned at `connect()`, so they inherit the context of the session's first message.
 
 ### Docker Auth Proxy
 
@@ -71,7 +75,8 @@ When `ENABLE_MCP=true`, MCP servers are built once at startup and selectively in
 - **HomeKit** — always loaded; controls HomeKit devices via pairing data from a JSON file (or HomeClaw HTTP bridge if `HOMECLAW_MCP_URL` is set)
 - **Gmail** — conditionally loaded when both `GMAIL_CREDENTIALS_FILE` and `GMAIL_TOKEN_FILE` are set; list, search, read, star/unstar, and mark-as-read (no send). Superuser-only. OAuth setup: `python scripts/gmail-auth.py`
 - **Calendar** — conditionally loaded when both `GMAIL_CREDENTIALS_FILE` and `GMAIL_TOKEN_FILE` are set; uses the same Google OAuth2 credentials as Gmail with the calendar scope. Superuser-only. Tools: calendar_list_events, calendar_get_event, calendar_create_event, calendar_update_event, calendar_delete_event.
-- **Scheduler** — conditionally loaded when `SCHEDULER_ENABLED=true`; manages autonomous background tasks (email digests, smart home routines, custom prompts) on cron schedules or polling intervals. Superuser-only. Tasks defined in `config/tasks.yaml`, state persisted in `data/scheduler_state.json`.
+- **Scheduler** — conditionally loaded when `SCHEDULER_ENABLED=true`; manages autonomous background tasks (email digests, smart home routines, custom prompts) on cron schedules or polling intervals. Superuser and authorized tiers (non-superusers can only manage their own tasks). Tasks defined in `config/tasks.yaml`, state persisted in `data/scheduler_state.json`.
+- **Memory** — conditionally loaded when `MEMORY_MCP_URL` is set (docker-compose: `http://memory:8765/mcp`, the shared `mcp-memory-service` container). Sessions never reach that server directly: `src/mcp/memory_server.py` is an in-process proxy exposing `memory_store`, `memory_search`, `memory_list` and `memory_delete` (by hash). It scopes every call to the requesting user's tag (their Slack user ID, the existing tag convention): stores always add it and refuse tags that look like another user's ID; searches/lists always filter with it (`tag_match=all`); deletes only succeed for memories tagged to the requester. Scheduled tasks use their owner's scope; legacy ownerless tasks use the `scope-system` tag. Memories with no user tag are no longer reachable. Superuser and authorized tiers.
 - **Flights** — conditionally loaded when `FLIGHTS_ENABLED=true`; subprocess stdio MCP server (`@privilegemendes/amadeus-mcp-server`) using the official Amadeus API. Available to superuser and authorized tiers (not free-tier users, since API calls have cost). Tools: search-flights, search-airports, flight-price-analysis, flight-inspiration, airport-routes, nearest-airports.
 - **Flight Watch** — conditionally loaded when `FLIGHTS_ENABLED=true`; manages flight price watches with automatic periodic checks. Supports both route-based watches (origin/destination on flexible dates) and specific flight tracking by airline and flight number for booked itineraries. Superuser and authorized tiers. Tools: flight_watch_add, flight_watch_list, flight_watch_remove, flight_watch_record, flight_watch_history.
 - **Seats Aero** — conditionally loaded when `SEATS_AERO_API_KEY` is set; searches award flight availability across 24 loyalty programs via the seats.aero Partner API. Independent of FLIGHTS_ENABLED. Superuser-only. Tools: award_search, award_trip_details.
@@ -98,12 +103,12 @@ tasks:
     output: dm                   # "dm" or "silent"
     model: sonnet                 # opus/sonnet/haiku
     enabled: true
-    created_by: U12345          # Slack user ID of task owner (auto-set by MCP tool)
+    created_by: U12345          # Slack user ID of task owner (set from the requester by the MCP tool)
 ```
 
-**Task ownership:** Tasks have an optional `created_by` field (Slack user ID) set automatically when created via MCP tools. The creator's tier determines which MCP servers the task can use (validated at creation time). Task result DMs go only to the task owner; tasks without an owner (legacy) broadcast to all superusers.
+**Task ownership:** Tasks have an optional `created_by` field (Slack user ID). `scheduler_add_task` sets it from the real requester (`current_user_id()`); the model can't supply or change it, and `id` can't be changed either. The owner's tier determines which MCP servers the task can use (validated on add and whenever `mcp_servers` is updated), and the task runs as its owner: non-superuser owners get filesystem tools blocked, and per-user tools (memory) use the owner's scope. Tasks without an owner (legacy, YAML-only) run with superuser privileges and can only be managed by superusers. Task result DMs go only to the task owner; legacy tasks broadcast to all superusers.
 
-**Management:** Superusers can manage tasks via Slack conversation using scheduler MCP tools (`scheduler_list_tasks`, `scheduler_add_task`, `scheduler_update_task`, `scheduler_remove_task`, `scheduler_pause_task`, `scheduler_resume_task`, `scheduler_trigger_task`, `scheduler_reload`).
+**Management:** Users manage tasks via Slack conversation using scheduler MCP tools (`scheduler_list_tasks`, `scheduler_get_task`, `scheduler_add_task`, `scheduler_update_task`, `scheduler_remove_task`, `scheduler_pause_task`, `scheduler_resume_task`, `scheduler_trigger_task`, `scheduler_reload`). Superusers may update/remove/pause/resume/trigger any task; everyone else only their own. Adding a task with an existing id is refused.
 
 **Circuit breaker:** Tasks that fail 5 consecutive times are auto-paused with a DM notification.
 
