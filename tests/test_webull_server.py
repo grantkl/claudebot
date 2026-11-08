@@ -14,6 +14,9 @@ import sys
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+import pytest
+
 
 # Install a fake claude_agent_sdk that preserves the decorated function
 # as `.handler` on the resulting wrapper. Mirrors the pattern used by
@@ -295,6 +298,84 @@ class TestHttpErrorHandling:
 
 
 # ---------------------------------------------------------------------------
+# Transport failures: "never reached the bridge" vs "order status unknown"
+# ---------------------------------------------------------------------------
+_REQ = httpx.Request("POST", "http://bridge/options/trade")
+
+
+def _assert_unknown(result: dict[str, Any]) -> None:
+    assert _is_error(result)
+    text = _parse_text(result)
+    assert "UNKNOWN" in text
+    assert "Do NOT retry" in text
+    assert "Webull" in text
+
+
+class TestTransportFailures:
+    @pytest.mark.parametrize("exc", [
+        httpx.ConnectError("refused", request=_REQ),
+        httpx.ConnectTimeout("connect timed out", request=_REQ),
+    ])
+    async def test_never_sent_says_not_placed(self, exc: Exception) -> None:
+        client = _make_client(side_effect=exc)
+
+        with patch.dict("os.environ", _ENV, clear=True):
+            with patch("src.mcp.webull_server.httpx.AsyncClient", return_value=client):
+                result = await _options_buy(_valid_buy_args())
+
+        assert _is_error(result)
+        text = _parse_text(result)
+        assert "not placed" in text.lower()
+        assert "UNKNOWN" not in text
+        assert client.post.await_count == 1
+
+    @pytest.mark.parametrize("exc", [
+        httpx.ReadTimeout("read timed out", request=_REQ),
+        httpx.WriteTimeout("write timed out", request=_REQ),
+        httpx.RemoteProtocolError("server disconnected", request=_REQ),
+        httpx.ReadError("connection reset", request=_REQ),
+        RuntimeError("something odd"),
+    ])
+    async def test_maybe_sent_reports_unknown_buy(self, exc: Exception) -> None:
+        client = _make_client(side_effect=exc)
+
+        with patch.dict("os.environ", _ENV, clear=True):
+            with patch("src.mcp.webull_server.httpx.AsyncClient", return_value=client):
+                result = await _options_buy(_valid_buy_args())
+
+        _assert_unknown(result)
+        # The tool itself must never resend the order.
+        assert client.post.await_count == 1
+
+    async def test_maybe_sent_reports_unknown_sell(self) -> None:
+        client = _make_client(side_effect=httpx.ReadTimeout("read timed out", request=_REQ))
+
+        with patch.dict("os.environ", _ENV, clear=True):
+            with patch("src.mcp.webull_server.httpx.AsyncClient", return_value=client):
+                result = await _options_sell(_valid_sell_args())
+
+        _assert_unknown(result)
+
+    async def test_unexpected_http_500_reports_unknown(self) -> None:
+        # The bridge returns 500 if it fails after Webull accepted the order
+        # (e.g. saving the order row), so a 500 does not mean "not placed".
+        client = _make_client(_mock_response(500, text="Internal Server Error"))
+
+        with patch.dict("os.environ", _ENV, clear=True):
+            with patch("src.mcp.webull_server.httpx.AsyncClient", return_value=client):
+                result = await _options_buy(_valid_buy_args())
+
+        _assert_unknown(result)
+        assert "500" in _parse_text(result)
+
+    def test_tool_descriptions_forbid_resubmitting_unknown(self) -> None:
+        for t in webull_server.WEBULL_TOOLS:
+            desc = t.description
+            assert "UNKNOWN" in desc
+            assert "never resubmit" in desc.lower()
+
+
+# ---------------------------------------------------------------------------
 # Local validation (must reject before any HTTP call)
 # ---------------------------------------------------------------------------
 class TestLocalValidationBuy:
@@ -483,9 +564,9 @@ class TestMissingConfig:
 # contract multiplier) and reject orders whose exposure exceeds the limit
 # BEFORE making any HTTP call. The error text includes both the configured
 # limit and the computed exposure. When the env var is unset, no limit is
-# enforced. When the env var is set to a non-numeric value, it is treated
-# as if unset (ignored — fail-open) so a misconfiguration cannot wedge the
-# tool entirely; impl is free to also log a warning.
+# enforced (an empty value counts as unset). When the env var is set to a
+# value that is not a finite number, the trade is refused (fail-closed) so a
+# typo can never silently remove the cap.
 class TestMaxTradeSizeGuard:
     async def test_below_limit_allowed_buy(self) -> None:
         # qty=1 * limit=1.25 * 100 = $125, below $500 limit
@@ -561,15 +642,54 @@ class TestMaxTradeSizeGuard:
         assert not _is_error(result)
         mock_cls.assert_called()
 
-    async def test_invalid_limit_value_ignored(self) -> None:
-        # Contract: a non-numeric MAX_OPTIONS_TRADE_USD is treated as unset
-        # (fail-open) so a typo can't wedge the tool. Order proceeds normally.
-        client = _make_client(_mock_response(200, {"order_id": "ok", "status": "submitted"}))
+    async def test_invalid_limit_value_refuses_trade(self) -> None:
+        # A set-but-unparsable cap must fail closed: no HTTP call, clear error.
+        client = _make_client(_mock_response(200, {"order_id": "should-not-fire", "status": "submitted"}))
         env = {**_ENV, "MAX_OPTIONS_TRADE_USD": "foo"}
 
         with patch.dict("os.environ", env, clear=True):
             with patch("src.mcp.webull_server.httpx.AsyncClient", return_value=client) as mock_cls:
                 result = await _options_buy(_valid_buy_args(qty=1, limit_price=1.25))
+
+        assert _is_error(result)
+        text = _parse_text(result)
+        assert "MAX_OPTIONS_TRADE_USD" in text
+        assert "foo" in text
+        mock_cls.assert_not_called()
+
+    async def test_formatted_limit_value_refuses_trade_sell(self) -> None:
+        # "$500" / "1,000" are not plain floats -> refuse rather than trade uncapped.
+        client = _make_client(_mock_response(200, {"order_id": "should-not-fire", "status": "submitted"}))
+        env = {**_ENV, "MAX_OPTIONS_TRADE_USD": "$1,000"}
+
+        with patch.dict("os.environ", env, clear=True):
+            with patch("src.mcp.webull_server.httpx.AsyncClient", return_value=client) as mock_cls:
+                result = await _options_sell(_valid_sell_args(qty=1, limit_price=1.25))
+
+        assert _is_error(result)
+        assert "MAX_OPTIONS_TRADE_USD" in _parse_text(result)
+        mock_cls.assert_not_called()
+
+    async def test_nan_limit_value_refuses_trade(self) -> None:
+        # float("nan") parses, but every comparison with it is False -> would be no cap.
+        client = _make_client(_mock_response(200, {"order_id": "should-not-fire", "status": "submitted"}))
+        env = {**_ENV, "MAX_OPTIONS_TRADE_USD": "nan"}
+
+        with patch.dict("os.environ", env, clear=True):
+            with patch("src.mcp.webull_server.httpx.AsyncClient", return_value=client) as mock_cls:
+                result = await _options_buy(_valid_buy_args(qty=10, limit_price=10.00))
+
+        assert _is_error(result)
+        mock_cls.assert_not_called()
+
+    async def test_empty_limit_value_means_no_cap(self) -> None:
+        # Empty string is treated the same as unset: no cap.
+        client = _make_client(_mock_response(200, {"order_id": "big", "status": "submitted"}))
+        env = {**_ENV, "MAX_OPTIONS_TRADE_USD": ""}
+
+        with patch.dict("os.environ", env, clear=True):
+            with patch("src.mcp.webull_server.httpx.AsyncClient", return_value=client) as mock_cls:
+                result = await _options_buy(_valid_buy_args(qty=10, limit_price=10.00))
 
         assert not _is_error(result)
         mock_cls.assert_called()
