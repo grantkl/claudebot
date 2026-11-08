@@ -15,6 +15,18 @@ class ClassifiedError:
     retryable: bool
 
 
+class PartialTurnError(Exception):
+    """A Claude turn failed after at least one tool call had already run.
+
+    The turn is not retried automatically, since re-running the prompt could
+    repeat side effects (trades, calendar events, deploys, ...).
+    """
+
+    def __init__(self, tool_calls: list[str]) -> None:
+        self.tool_calls = tool_calls
+        super().__init__(f"Turn failed after {len(tool_calls)} tool call(s): {', '.join(tool_calls)}")
+
+
 def classify_error(error: Exception) -> ClassifiedError:
     """Classify an exception into a structured error with user-friendly messaging.
 
@@ -24,6 +36,19 @@ def classify_error(error: Exception) -> ClassifiedError:
     error_type = type(error).__name__
     error_str = str(error)
     error_str_lower = error_str.lower()
+
+    if isinstance(error, PartialTurnError):
+        tools = ", ".join(_tool_name(c) for c in error.tool_calls)
+        return ClassifiedError(
+            category="partial_completion",
+            user_message=(
+                "Something went wrong partway through your request, after I had"
+                f" already used these tools: {tools}. Some actions may have"
+                " completed. Please check before asking me to try again."
+            ),
+            log_message=f"PartialTurnError: {_truncate(error_str, 300)} (cause: {error.__cause__!r})",
+            retryable=False,
+        )
 
     # Google API HTTP errors (googleapiclient.errors.HttpError)
     if error_type == "HttpError" and hasattr(error, "resp"):
@@ -151,6 +176,11 @@ def _extract_status_code(error: Exception) -> int | None:
     if hasattr(error, "response") and hasattr(error.response, "status_code"):  # type: ignore[union-attr]
         return int(error.response.status_code)  # type: ignore[union-attr]
     return None
+
+
+def _tool_name(call: str) -> str:
+    """Strip the input summary from a logged tool call like ``name({...})``."""
+    return call.split("(", 1)[0]
 
 
 def _matches_any(name: str, candidates: tuple[str, ...]) -> bool:

@@ -64,7 +64,7 @@ from claude_agent_sdk import (
 )
 
 from .config import Config
-from .error_utils import classify_error
+from .error_utils import PartialTurnError, classify_error
 
 logger = logging.getLogger(__name__)
 
@@ -463,6 +463,9 @@ class ClaudeManager:
                 if want:
                     logger.info("Session %s MCP servers enabled: %s", thread_ts, want)
 
+                # Tools run during this turn; a failure after any of them ran
+                # must not re-run the prompt (could repeat side effects).
+                tool_calls: list[str] = []
                 try:
                     if images:
                         content: list[dict[str, Any]] = [{"type": "text", "text": query_text}]
@@ -490,7 +493,6 @@ class ClaudeManager:
                     response_parts: list[str] = []
                     screenshot_paths: list[str] = []
                     used_shopping_list_view = False
-                    tool_calls: list[str] = []
                     stop_reason: str | None = None
                     async for msg in entry.client.receive_response():
                         if isinstance(msg, AssistantMessage):
@@ -542,6 +544,12 @@ class ClaudeManager:
                     # Drop only this session; if it was already replaced, the
                     # newer one belongs to someone else's turn.
                     await self._discard_locked(thread_ts, entry)
+                    if tool_calls:
+                        logger.exception(
+                            "Error in Claude session for thread %s after %d tool call(s) %s — not retrying [%s]: %s",
+                            thread_ts, len(tool_calls), tool_calls, classified.category, classified.log_message,
+                        )
+                        raise PartialTurnError(tool_calls) from exc
                     if _retry:
                         logger.warning(
                             "Session error for thread %s [%s]: %s — retrying with fresh session",
