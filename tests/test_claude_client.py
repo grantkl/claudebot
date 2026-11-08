@@ -79,6 +79,7 @@ sys.modules["claude_agent_sdk"] = _mock_sdk
 sys.modules.pop("src.claude_client", None)
 
 from src.claude_client import ClaudeManager, SendMessageResult, SessionEntry  # noqa: E402
+from src.error_utils import PartialTurnError, classify_error  # noqa: E402
 
 if _orig_sdk is not None:
     sys.modules["claude_agent_sdk"] = _orig_sdk
@@ -189,6 +190,57 @@ class TestClaudeManager:
 
         assert result.text == "recovered"
         assert "t1" in manager._sessions
+
+    @pytest.mark.asyncio
+    async def test_no_retry_after_tool_call_ran(self):
+        """A turn that fails after a tool ran must not be re-run (duplicate side effects)."""
+        config = _make_config()
+        manager = ClaudeManager(config)
+
+        class _ToolThenCrashClient(_FakeClaudeSDKClient):
+            async def receive_response(self):
+                yield _FakeAssistantMessage(content=[
+                    _FakeToolUseBlock(name="mcp__webull__options_buy", input={"ticker": "SPY"}),
+                ])
+                raise RuntimeError("stream died")
+
+        clients = [_ToolThenCrashClient(), _FakeClaudeSDKClient()]
+        it = iter(clients)
+        with patch("src.claude_client.ClaudeSDKClient", side_effect=lambda **kw: next(it)):
+            with pytest.raises(PartialTurnError) as excinfo:
+                await manager.send_message("t1", "buy SPY")
+
+        assert clients[0].query.call_count == 1
+        # No fresh session was created to re-run the prompt
+        assert clients[1].query.call_count == 0
+        assert "t1" not in manager._sessions
+        assert isinstance(excinfo.value.__cause__, RuntimeError)
+        assert "options_buy" in str(excinfo.value)
+        assert "may have" in classify_error(excinfo.value).user_message
+        assert classify_error(excinfo.value).retryable is False
+
+    @pytest.mark.asyncio
+    async def test_retry_when_failure_before_any_tool_call(self):
+        """Failure mid-stream with only text (no tools) still gets one retry."""
+        config = _make_config()
+        manager = ClaudeManager(config)
+
+        class _TextThenCrashClient(_FakeClaudeSDKClient):
+            async def receive_response(self):
+                yield _FakeAssistantMessage(content=[_FakeTextBlock(text="thinking...")])
+                raise RuntimeError("stream died")
+
+        ok_client = _FakeClaudeSDKClient()
+        ok_client.set_responses([
+            _FakeAssistantMessage(content=[_FakeTextBlock(text="recovered")]),
+            _FakeResultMessage(),
+        ])
+        it = iter([_TextThenCrashClient(), ok_client])
+        with patch("src.claude_client.ClaudeSDKClient", side_effect=lambda **kw: next(it)):
+            result = await manager.send_message("t1", "hello")
+
+        assert result.text == "recovered"
+        ok_client.query.assert_awaited_once_with("hello")
 
     @pytest.mark.asyncio
     async def test_cleanup_evicts_old_sessions(self):

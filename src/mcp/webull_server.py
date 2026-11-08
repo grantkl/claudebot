@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from datetime import datetime
 from typing import Any
@@ -23,6 +24,14 @@ def _text(text: str) -> dict[str, Any]:
 
 def _error(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "is_error": True}
+
+
+def _unknown_status(reason: str) -> dict[str, Any]:
+    return _error(
+        f"Order status UNKNOWN ({reason}). The order may or may not have been placed."
+        " Do NOT retry or resubmit this order. Check positions and open orders in"
+        " Webull first, and tell the user to verify there before trading again."
+    )
 
 
 def _parse_detail(resp: httpx.Response) -> str:
@@ -63,17 +72,25 @@ async def _submit_trade(side: str, args: dict[str, Any]) -> dict[str, Any]:
     except (ValueError, TypeError):
         return _error("Invalid expiry: must be YYYY-MM-DD format")
 
-    max_trade_raw = os.environ.get("MAX_OPTIONS_TRADE_USD")
-    if max_trade_raw is not None:
+    # Unset or empty means no cap. Anything else must be a finite number,
+    # otherwise refuse: a typo must never silently remove the cap.
+    max_trade_raw = os.environ.get("MAX_OPTIONS_TRADE_USD", "")
+    if max_trade_raw:
         try:
             max_trade = float(max_trade_raw)
-            exposure = qty * limit_price * OPTION_CONTRACT_MULTIPLIER
-            if exposure > max_trade:
-                return _error(
-                    f"Trade exposure ${exposure:g} exceeds MAX_OPTIONS_TRADE_USD limit of ${max_trade:g}"
-                )
-        except (ValueError, TypeError):
-            pass
+        except ValueError:
+            max_trade = math.nan
+        if not math.isfinite(max_trade):
+            logger.error("Refusing trade: invalid MAX_OPTIONS_TRADE_USD=%r", max_trade_raw)
+            return _error(
+                f"Trade refused: MAX_OPTIONS_TRADE_USD is set to {max_trade_raw!r}, which is not a"
+                " valid number. Fix the setting (e.g. 500) or unset it before trading."
+            )
+        exposure = qty * limit_price * OPTION_CONTRACT_MULTIPLIER
+        if exposure > max_trade:
+            return _error(
+                f"Trade exposure ${exposure:g} exceeds MAX_OPTIONS_TRADE_USD limit of ${max_trade:g}"
+            )
 
     base = os.environ.get("WEBULL_TRADE_URL", DEFAULT_TRADE_URL).rstrip("/")
     url = f"{base}/options/trade"
@@ -93,10 +110,17 @@ async def _submit_trade(side: str, args: dict[str, Any]) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, json=body, headers=headers)
-    except httpx.RequestError as exc:
-        return _error(f"Trade request failed: {type(exc).__name__}: {exc}")
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        # No connection was made, so the bridge never saw the order.
+        return _error(
+            f"Order NOT placed: could not connect to the trading service ({type(exc).__name__}: {exc})."
+        )
     except Exception as exc:
-        return _error(f"Trade request failed: {type(exc).__name__}: {exc}")
+        # The request may have reached the bridge (e.g. ReadTimeout after it
+        # was sent). The bridge has no idempotency key, so a resend could
+        # place a second real-money order.
+        logger.error("Options %s order status unknown: %s: %s", side, type(exc).__name__, exc)
+        return _unknown_status(f"{type(exc).__name__}: {exc}")
 
     status = resp.status_code
     if status == 200:
@@ -115,7 +139,9 @@ async def _submit_trade(side: str, args: dict[str, Any]) -> dict[str, Any]:
         return _error(f"Webull rejected order: {_parse_detail(resp)}")
     if status == 503:
         return _error(f"Options endpoint not configured: {_parse_detail(resp)}")
-    return _error(f"Trade failed (HTTP {status}): {resp.text}")
+    # Any other status (e.g. a 500 raised after Webull accepted the order)
+    # does not prove the order was not placed.
+    return _unknown_status(f"HTTP {status}: {resp.text}")
 
 
 _TRADE_SCHEMA = {
@@ -138,7 +164,9 @@ _TRADE_SCHEMA = {
 
 @tool(
     "options_buy",
-    "Submit a BUY order for a single options contract via the Webull trading service. Real money — only call when the user explicitly requests a trade with all parameters confirmed.",
+    "Submit a BUY order for a single options contract via the Webull trading service. Real money — only call when the user explicitly requests a trade with all parameters confirmed."
+    " Call at most once per confirmed order. If the result says the order status is UNKNOWN,"
+    " never resubmit: tell the user to check positions and open orders in Webull first.",
     _TRADE_SCHEMA,
 )
 async def options_buy(args: dict[str, Any]) -> dict[str, Any]:
@@ -147,7 +175,9 @@ async def options_buy(args: dict[str, Any]) -> dict[str, Any]:
 
 @tool(
     "options_sell",
-    "Submit a SELL order for a single options contract via the Webull trading service. Real money — only call when the user explicitly requests a trade with all parameters confirmed.",
+    "Submit a SELL order for a single options contract via the Webull trading service. Real money — only call when the user explicitly requests a trade with all parameters confirmed."
+    " Call at most once per confirmed order. If the result says the order status is UNKNOWN,"
+    " never resubmit: tell the user to check positions and open orders in Webull first.",
     _TRADE_SCHEMA,
 )
 async def options_sell(args: dict[str, Any]) -> dict[str, Any]:
