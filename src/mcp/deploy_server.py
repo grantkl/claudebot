@@ -38,14 +38,14 @@ def _error(text: str) -> dict[str, Any]:
 )
 async def trigger_deploy(args: dict[str, Any]) -> dict[str, Any]:
     try:
-        from src.claude_client import _current_user_id
+        from src.claude_client import current_user_id
 
         reason = args.get("reason", "")
         trigger_data: dict[str, Any] = {
             "reason": reason,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        user_id = _current_user_id.get()
+        user_id = current_user_id()
         if user_id is not None:
             trigger_data["user_id"] = user_id
 

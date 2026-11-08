@@ -133,6 +133,24 @@ class TestTriggerDeployFireAndForget:
         data = _read_trigger(trigger_path)
         assert data["user_id"] == "U123"
 
+    async def test_user_id_is_current_turn_user_in_shared_thread(self, tmp_path: Path) -> None:
+        """Tool handlers inherit the session creator's context, so the trigger
+        must record the user of the current turn, not the creator."""
+        from src.claude_client import _current_user_id, _Requester, _session_requester
+
+        trigger_path = tmp_path / "deploy.trigger"
+
+        creator = _current_user_id.set("U_CREATOR")
+        holder = _session_requester.set(_Requester(user_id="U_CURRENT"))
+        try:
+            with patch.object(deploy_server, "TRIGGER_FILE", str(trigger_path)):
+                await asyncio.wait_for(_trigger_deploy({"reason": "shared"}), timeout=2.0)
+        finally:
+            _session_requester.reset(holder)
+            _current_user_id.reset(creator)
+
+        assert _read_trigger(trigger_path)["user_id"] == "U_CURRENT"
+
     async def test_user_id_omitted_when_contextvar_unset(self, tmp_path: Path) -> None:
         """When _current_user_id is None, the trigger file should NOT include user_id
         (or include it as null). Recommended: omit the key entirely."""
