@@ -728,7 +728,7 @@ class TestSlackApp:
         )
 
     @pytest.mark.asyncio
-    async def test_unauthorized_user_evicts_authorized_session(self):
+    async def test_unauthorized_user_in_authorized_thread_passes_own_tier(self):
         config = _make_config(authorized_user_ids={"UOTHER"})
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
@@ -746,7 +746,8 @@ class TestSlackApp:
         handler = app._handlers["app_mention"]
         await handler(event=event, say=say, client=client)
 
-        claude_manager.remove_session.assert_called_once_with(event["ts"])
+        # Tier-mismatch eviction now happens inside send_message under the session lock.
+        claude_manager.remove_session.assert_not_called()
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="haiku", mcp_server_names={"stocks", "web_search"}, needed_servers=set(), images=None,
@@ -835,7 +836,7 @@ class TestSlackApp:
         )
 
     @pytest.mark.asyncio
-    async def test_non_superuser_evicts_superuser_session(self):
+    async def test_non_superuser_in_superuser_thread_passes_own_tier(self):
         config = _make_config(authorized_user_ids={"U001"}, superuser_ids={"UOTHER"})
         claude_manager = AsyncMock()
         claude_manager.send_message = AsyncMock(return_value=_mock_result("response"))
@@ -854,7 +855,8 @@ class TestSlackApp:
         handler = app._handlers["app_mention"]
         await handler(event=event, say=say, client=client)
 
-        claude_manager.remove_session.assert_called_once_with(event["ts"])
+        # Tier-mismatch eviction now happens inside send_message under the session lock.
+        claude_manager.remove_session.assert_not_called()
         claude_manager.send_message.assert_called_once_with(
             event["ts"], "hello", thread_context=None,
             model="sonnet", mcp_server_names={"sonos", "homekit", "flights", "flight_watch", "google_flights", "scheduler", "stocks", "web_search", "shopping_list", "memory"}, needed_servers={"memory"}, images=None,
@@ -1055,3 +1057,38 @@ class TestWebullKeywordRouting:
         call_kwargs = claude_manager.send_message.call_args.kwargs
         needed_servers = call_kwargs["needed_servers"]
         assert "webull" in needed_servers
+
+
+class TestImagePathUpload:
+    """Absolute image paths in a reply are opened and uploaded to Slack —
+    that is a file read, so only superusers (who have Read anyway) get it."""
+
+    async def _reply(self, tmp_path, user, superuser_ids):
+        img = tmp_path / "secret.png"
+        img.write_bytes(b"\x89PNG")
+        config = _make_config(authorized_user_ids={"U001", "USUPER"}, superuser_ids=superuser_ids)
+        claude_manager = AsyncMock()
+        claude_manager.send_message = AsyncMock(return_value=_mock_result(f"here {img}"))
+        claude_manager.has_session = MagicMock(return_value=True)
+        claude_manager.registered_mcp_server_names = {"stocks"}
+        client = _make_client()
+        with patch("src.slack_app.AsyncApp", _FakeAsyncApp):
+            app = create_app(config, claude_manager, _make_rate_limiter())
+        await app._handlers["app_mention"](
+            event=_make_event(user=user), say=_make_say(), client=client,
+        )
+        return client, img
+
+    @pytest.mark.asyncio
+    async def test_non_superuser_reply_path_is_not_uploaded(self, tmp_path):
+        client, img = await self._reply(tmp_path, "U001", superuser_ids={"USUPER"})
+        assert not any("file" in c.kwargs for c in client.files_upload_v2.call_args_list)
+        text = client.chat_update.call_args.kwargs["text"]
+        assert "[Screenshot:" not in text
+
+    @pytest.mark.asyncio
+    async def test_superuser_screenshot_is_uploaded(self, tmp_path):
+        client, img = await self._reply(tmp_path, "USUPER", superuser_ids={"USUPER"})
+        uploads = [c for c in client.files_upload_v2.call_args_list if "file" in c.kwargs]
+        assert len(uploads) == 1
+        assert uploads[0].kwargs["filename"] == "secret.png"

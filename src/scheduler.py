@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import yaml
 from croniter import croniter
 
+from .authorized_users import AUTHORIZED_MCP_SERVERS, EVERYONE_MCP_SERVERS, FILESYSTEM_TOOLS
 from .error_utils import classify_error
 
 if TYPE_CHECKING:
@@ -26,8 +27,11 @@ logger = logging.getLogger(__name__)
 
 NOTHING_TO_REPORT = "NOTHING_TO_REPORT"
 
-SUPERUSER_MCP_SERVERS = {"sonos", "homekit", "gmail", "calendar", "flights", "flight_watch", "seats_aero", "stocks", "web_search", "fb_marketplace", "memory", "credit_card"}
-AUTHORIZED_MCP_SERVERS = {"sonos", "homekit", "flights", "flight_watch", "scheduler", "stocks", "web_search", "memory", "credit_card"}
+# Fields a scheduler_update_task call may change. id and created_by are fixed.
+_UPDATABLE_FIELDS = {
+    "name", "prompt", "cron", "interval_seconds", "mcp_servers",
+    "output", "model", "enabled", "run_once",
+}
 
 
 @dataclass
@@ -80,21 +84,39 @@ class TaskScheduler:
         self._load_state()
 
     def validate_task_mcp_servers(self, task_data: dict[str, Any]) -> None:
-        """Validate that the task creator is allowed to use the requested MCP servers."""
+        """Validate that the task creator is allowed to use the requested MCP servers.
+
+        Uses the same per-tier server sets as Slack.
+        """
         created_by = task_data.get("created_by")
         if created_by is None:
             return
         if created_by in self._config.superuser_ids:
-            allowed = SUPERUSER_MCP_SERVERS
+            allowed = self._claude_manager.registered_mcp_server_names
         elif created_by in self._config.authorized_user_ids:
             allowed = AUTHORIZED_MCP_SERVERS
         else:
-            allowed: set[str] = set()
+            allowed = EVERYONE_MCP_SERVERS
         disallowed = [s for s in task_data.get("mcp_servers", []) if s not in allowed]
         if disallowed:
             raise ValueError(
                 f"User {created_by} is not allowed to use MCP servers: {', '.join(disallowed)}"
             )
+
+    def check_can_manage(self, task_id: str, requester: str | None) -> None:
+        """Raise PermissionError unless *requester* may manage *task_id*.
+
+        Superusers may manage any task. Everyone else may only manage tasks
+        they own; legacy tasks without an owner are superuser-only. Missing
+        tasks pass so the caller reports "not found".
+        """
+        task = self._tasks.get(task_id)
+        if task is None:
+            return
+        if requester is not None and requester in self._config.superuser_ids:
+            return
+        if requester is None or task.created_by != requester:
+            raise PermissionError(f"You can only manage tasks you created; '{task_id}' is not yours.")
 
     def _load_tasks(self) -> None:
         """Load task definitions from YAML file."""
@@ -242,14 +264,18 @@ class TaskScheduler:
         logger.info("Executing scheduled task: %s (%s)", task.name, task_id)
 
         try:
+            # The task runs as its owner: user_id scopes per-user tools (e.g.
+            # memory) to the owner; legacy ownerless tasks run with no user.
             result = await self._claude_manager.send_message(
                 thread_ts,
                 prompt,
                 model=task.model,
                 mcp_server_names=mcp_server_names,
                 needed_servers=mcp_server_names,
+                disallowed_tools=None if superuser else list(FILESYSTEM_TOOLS),
                 authorized=authorized,
                 superuser=superuser,
+                user_id=task.created_by,
             )
             response = result.text
 
@@ -552,7 +578,13 @@ class TaskScheduler:
         }
 
     def add_task(self, task_data: dict[str, Any]) -> TaskDefinition:
-        """Add a new task and save to YAML."""
+        """Add a new task and save to YAML.
+
+        ``task_data["created_by"]`` is trusted here; the MCP tool sets it from
+        the real requester.
+        """
+        if task_data["id"] in self._tasks:
+            raise ValueError(f"Task '{task_data['id']}' already exists")
         self.validate_task_mcp_servers(task_data)
         task = TaskDefinition(
             id=task_data["id"],
@@ -582,13 +614,23 @@ class TaskScheduler:
         return True
 
     def update_task(self, task_id: str, updates: dict[str, Any]) -> bool:
-        """Update an existing task's fields."""
+        """Update an existing task's fields.
+
+        ``id`` and ``created_by`` can't be changed, and a new ``mcp_servers``
+        list is validated against the owner's tier (the task runs as its owner).
+        """
         task = self._tasks.get(task_id)
         if task is None:
             return False
+        forbidden = set(updates) - _UPDATABLE_FIELDS
+        if forbidden:
+            raise ValueError(f"Cannot update field(s): {', '.join(sorted(forbidden))}")
+        if "mcp_servers" in updates:
+            self.validate_task_mcp_servers({
+                "created_by": task.created_by, "mcp_servers": updates["mcp_servers"],
+            })
         for key, value in updates.items():
-            if hasattr(task, key) and key != "id":
-                setattr(task, key, value)
+            setattr(task, key, value)
         self._save_tasks()
         return True
 

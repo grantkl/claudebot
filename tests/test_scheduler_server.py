@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -20,6 +20,7 @@ def _make_sdk_mock() -> MagicMock:
             wrapper = MagicMock()
             wrapper.handler = fn
             wrapper.__name__ = fn.__name__
+            wrapper.input_schema = schema
             return wrapper
         return decorator
 
@@ -178,8 +179,10 @@ class TestAddTask:
         sched.add_task.return_value = mock_task
         scheduler_server._scheduler = sched
 
-        result = await _add_task({"id": "new_task", "name": "New", "prompt": "Do Y"})
+        with patch.object(scheduler_server, "_requester", return_value="U1"):
+            result = await _add_task({"id": "new_task", "name": "New", "prompt": "Do Y"})
         assert not _is_error(result)
+        assert sched.add_task.call_args.args[0]["created_by"] == "U1"
         assert "new_task" in _parse_text(result)
         assert "created" in _parse_text(result).lower()
 
@@ -285,3 +288,154 @@ class TestReload:
         assert not _is_error(result)
         assert "5" in _parse_text(result)
         assert "reloaded" in _parse_text(result).lower()
+
+
+# ---------------------------------------------------------------------------
+# Ownership enforcement (real TaskScheduler, requester from the session)
+# ---------------------------------------------------------------------------
+import yaml  # noqa: E402
+
+from src.scheduler import TaskScheduler  # noqa: E402
+
+
+def _real_scheduler(tmp_path, tasks):
+    cfg = MagicMock()
+    cfg.scheduler_concurrency = 3
+    cfg.scheduler_timezone = "US/Pacific"
+    cfg.superuser_ids = {"U_SUPER"}
+    cfg.authorized_user_ids = {"U_SUPER", "U_AUTH", "U_AUTH2"}
+    manager = AsyncMock()
+    manager.registered_mcp_server_names = {
+        "sonos", "homekit", "gmail", "calendar", "scheduler", "stocks",
+        "web_search", "memory", "credit_card", "shopping_list",
+    }
+    tasks_file = tmp_path / "tasks.yaml"
+    tasks_file.write_text(yaml.dump({"tasks": tasks}))
+    return TaskScheduler(cfg, manager, "xoxb", str(tasks_file), str(tmp_path / "state.json"))
+
+
+def _task(task_id, created_by=None, servers=None):
+    t = {
+        "id": task_id, "name": task_id, "prompt": "p",
+        "interval_seconds": 300, "mcp_servers": servers or ["sonos"],
+    }
+    if created_by is not None:
+        t["created_by"] = created_by
+    return t
+
+
+def _as_user(user_id):
+    return patch.object(scheduler_server, "_requester", return_value=user_id, create=True)
+
+
+class TestOwnership:
+    async def test_add_task_owner_comes_from_requester_not_args(self, tmp_path):
+        sched = _real_scheduler(tmp_path, [])
+        scheduler_server._scheduler = sched
+        with _as_user("U_AUTH"):
+            result = await _add_task({
+                "id": "mine", "name": "Mine", "prompt": "p",
+                "mcp_servers": ["sonos"], "created_by": "U_SUPER",
+            })
+        assert not _is_error(result), _parse_text(result)
+        assert sched._tasks["mine"].created_by == "U_AUTH"
+
+    async def test_add_task_spoofed_superuser_cannot_unlock_gmail(self, tmp_path):
+        sched = _real_scheduler(tmp_path, [])
+        scheduler_server._scheduler = sched
+        with _as_user("U_AUTH"):
+            result = await _add_task({
+                "id": "evil", "name": "Evil", "prompt": "read email",
+                "mcp_servers": ["gmail"], "created_by": "U_SUPER",
+            })
+        assert _is_error(result)
+        assert "evil" not in sched._tasks
+
+    async def test_add_task_without_requester_is_refused(self, tmp_path):
+        sched = _real_scheduler(tmp_path, [])
+        scheduler_server._scheduler = sched
+        with _as_user(None):
+            result = await _add_task({"id": "x", "name": "X", "prompt": "p"})
+        assert _is_error(result)
+        assert "x" not in sched._tasks
+
+    async def test_add_task_cannot_overwrite_existing_task(self, tmp_path):
+        sched = _real_scheduler(tmp_path, [_task("digest", created_by="U_SUPER", servers=["gmail"])])
+        scheduler_server._scheduler = sched
+        with _as_user("U_AUTH"):
+            result = await _add_task({"id": "digest", "name": "Hijack", "prompt": "p"})
+        assert _is_error(result)
+        assert sched._tasks["digest"].created_by == "U_SUPER"
+        assert sched._tasks["digest"].name == "digest"
+
+    @pytest.mark.parametrize("owner", ["U_SUPER", "U_AUTH2", None])
+    async def test_non_owner_cannot_manage_task(self, tmp_path, owner):
+        sched = _real_scheduler(tmp_path, [_task("t", created_by=owner)])
+        scheduler_server._scheduler = sched
+        with _as_user("U_AUTH"), patch.object(sched, "_execute_with_semaphore", AsyncMock()) as run:
+            results = [
+                await _update_task({"task_id": "t", "prompt": "pwned"}),
+                await _pause_task({"task_id": "t"}),
+                await _resume_task({"task_id": "t"}),
+                await _trigger_task({"task_id": "t"}),
+                await _remove_task({"task_id": "t"}),
+            ]
+        assert all(_is_error(r) for r in results), [_parse_text(r) for r in results]
+        assert "t" in sched._tasks
+        assert sched._tasks["t"].prompt == "p"
+        assert "t" not in sched._state or not sched._state["t"].paused
+        run.assert_not_called()
+
+    async def test_owner_can_manage_own_task(self, tmp_path):
+        sched = _real_scheduler(tmp_path, [_task("t", created_by="U_AUTH")])
+        scheduler_server._scheduler = sched
+        with _as_user("U_AUTH"):
+            assert not _is_error(await _update_task({"task_id": "t", "prompt": "new"}))
+            assert sched._tasks["t"].prompt == "new"
+            assert not _is_error(await _pause_task({"task_id": "t"}))
+            assert not _is_error(await _resume_task({"task_id": "t"}))
+            assert not _is_error(await _remove_task({"task_id": "t"}))
+        assert "t" not in sched._tasks
+
+    @pytest.mark.parametrize("owner", ["U_AUTH", None])
+    async def test_superuser_can_manage_any_task(self, tmp_path, owner):
+        sched = _real_scheduler(tmp_path, [_task("t", created_by=owner)])
+        scheduler_server._scheduler = sched
+        with _as_user("U_SUPER"):
+            assert not _is_error(await _pause_task({"task_id": "t"}))
+            assert not _is_error(await _remove_task({"task_id": "t"}))
+        assert "t" not in sched._tasks
+
+    async def test_update_cannot_change_owner_or_id(self, tmp_path):
+        sched = _real_scheduler(tmp_path, [_task("t", created_by="U_AUTH")])
+        scheduler_server._scheduler = sched
+        with _as_user("U_AUTH"):
+            r1 = await _update_task({"task_id": "t", "created_by": "U_SUPER"})
+            r2 = await _update_task({"task_id": "t", "id": "other"})
+        assert _is_error(r1)
+        assert _is_error(r2)
+        assert sched._tasks["t"].created_by == "U_AUTH"
+        assert sched._tasks["t"].id == "t"
+
+    async def test_update_revalidates_mcp_servers_against_owner_tier(self, tmp_path):
+        sched = _real_scheduler(tmp_path, [_task("t", created_by="U_AUTH")])
+        scheduler_server._scheduler = sched
+        with _as_user("U_AUTH"):
+            result = await _update_task({"task_id": "t", "mcp_servers": ["gmail"]})
+        assert _is_error(result)
+        assert sched._tasks["t"].mcp_servers == ["sonos"]
+
+    async def test_superuser_update_still_validated_against_owner_tier(self, tmp_path):
+        # A superuser editing an authorized user's task must not grant it
+        # servers its owner's tier can't use (it runs as the owner).
+        sched = _real_scheduler(tmp_path, [_task("t", created_by="U_AUTH")])
+        scheduler_server._scheduler = sched
+        with _as_user("U_SUPER"):
+            result = await _update_task({"task_id": "t", "mcp_servers": ["gmail"]})
+        assert _is_error(result)
+        assert sched._tasks["t"].mcp_servers == ["sonos"]
+
+    def test_tool_schemas_do_not_accept_created_by(self):
+        for t in (scheduler_server.scheduler_add_task, scheduler_server.scheduler_update_task):
+            assert "created_by" not in t.input_schema["properties"]
+            assert "created_by" not in t.input_schema.get("required", [])

@@ -67,6 +67,12 @@ def _make_scheduler(tmp_path, tasks=None, **config_overrides):
     """Create a scheduler with optional tasks written to a YAML file."""
     config = _make_config(**config_overrides)
     claude_manager = AsyncMock()
+    # Superusers may schedule any registered server (same as Slack).
+    claude_manager.registered_mcp_server_names = {
+        "sonos", "homekit", "gmail", "calendar", "flights", "flight_watch",
+        "seats_aero", "stocks", "web_search", "fb_marketplace", "memory",
+        "credit_card", "scheduler", "shopping_list",
+    }
     state_file = str(tmp_path / "state.json")
     if tasks is not None:
         tasks_file = _make_tasks_yaml(tmp_path, tasks)
@@ -524,6 +530,82 @@ class TestTaskOwnership:
         scheduler = _make_scheduler(tmp_path, tasks=[task_data])
         result = scheduler.get_task("test_task")
         assert result["created_by"] == "U_OWNER"
+
+
+# ---------------------------------------------------------------------------
+# Tier enforcement at execution time (filesystem block, owner identity)
+# ---------------------------------------------------------------------------
+_FS_TOOLS = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
+
+
+class TestTaskExecutionTier:
+    async def _run(self, tmp_path, created_by, **cfg):
+        task_data = {**_sample_task_data(), "mcp_servers": ["sonos"]}
+        if created_by is not None:
+            task_data["created_by"] = created_by
+        scheduler = _make_scheduler(tmp_path, tasks=[task_data], **cfg)
+        scheduler._claude_manager.send_message = AsyncMock(return_value=_mock_result(NOTHING_TO_REPORT))
+        scheduler._claude_manager.remove_session = AsyncMock()
+        with patch("slack_sdk.web.async_client.AsyncWebClient"):
+            await scheduler._execute_task(scheduler._tasks["test_task"])
+        return scheduler._claude_manager.send_message.call_args.kwargs
+
+    async def test_authorized_owner_task_blocks_filesystem_tools(self, tmp_path):
+        kwargs = await self._run(
+            tmp_path, "U_AUTH", superuser_ids={"U_SUPER"}, authorized_user_ids={"U_AUTH"},
+        )
+        assert kwargs["disallowed_tools"] == _FS_TOOLS
+
+    async def test_unknown_owner_task_blocks_filesystem_tools(self, tmp_path):
+        kwargs = await self._run(tmp_path, "U_STRANGER", superuser_ids={"U_SUPER"})
+        assert kwargs["disallowed_tools"] == _FS_TOOLS
+
+    async def test_superuser_owner_task_keeps_filesystem_tools(self, tmp_path):
+        kwargs = await self._run(tmp_path, "U_SUPER", superuser_ids={"U_SUPER"})
+        assert kwargs.get("disallowed_tools") is None
+
+    async def test_task_runs_as_its_owner(self, tmp_path):
+        kwargs = await self._run(
+            tmp_path, "U_AUTH", superuser_ids={"U_SUPER"}, authorized_user_ids={"U_AUTH"},
+        )
+        assert kwargs["user_id"] == "U_AUTH"
+
+    async def test_legacy_task_runs_without_user_identity(self, tmp_path):
+        kwargs = await self._run(tmp_path, None)
+        assert kwargs.get("user_id") is None
+        assert kwargs["superuser"] is True
+
+
+# ---------------------------------------------------------------------------
+# Scheduler tier server sets match Slack's (single source of truth)
+# ---------------------------------------------------------------------------
+class TestTierServerSets:
+    def test_authorized_cannot_schedule_credit_card(self, tmp_path):
+        scheduler = _make_scheduler(
+            tmp_path, tasks=[], superuser_ids={"U_SUPER"}, authorized_user_ids={"U_AUTH"},
+        )
+        with pytest.raises(ValueError, match="not allowed"):
+            scheduler.add_task({
+                "id": "cc", "name": "CC", "prompt": "p",
+                "mcp_servers": ["credit_card"], "created_by": "U_AUTH",
+            })
+
+    def test_authorized_scheduler_set_is_slack_authorized_set(self, tmp_path):
+        from src.authorized_users import AUTHORIZED_MCP_SERVERS
+
+        scheduler = _make_scheduler(
+            tmp_path, tasks=[], superuser_ids={"U_SUPER"}, authorized_user_ids={"U_AUTH"},
+        )
+        task = scheduler.add_task({
+            "id": "ok", "name": "OK", "prompt": "p",
+            "mcp_servers": sorted(AUTHORIZED_MCP_SERVERS), "created_by": "U_AUTH",
+        })
+        assert task.created_by == "U_AUTH"
+
+    def test_slack_authorized_set_has_no_superuser_only_servers(self):
+        from src.authorized_users import AUTHORIZED_MCP_SERVERS
+
+        assert not AUTHORIZED_MCP_SERVERS & {"gmail", "calendar", "credit_card", "webull", "deploy", "seats_aero"}
 
 
 # ---------------------------------------------------------------------------

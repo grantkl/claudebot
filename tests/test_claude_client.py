@@ -736,7 +736,8 @@ class TestClaudeManager:
         assert "You have access to Gmail capabilities" in options.system_prompt
 
     @pytest.mark.asyncio
-    async def test_user_id_system_prompt_injected_with_scheduler(self):
+    async def test_scheduler_prompt_does_not_ask_model_for_created_by(self):
+        # Task ownership comes from the real requester, never from the model.
         config = _make_config()
         manager = ClaudeManager(config)
         manager._mcp_servers = {"scheduler": "sched_srv"}
@@ -749,8 +750,7 @@ class TestClaudeManager:
             await manager.send_message("t1", "hello", mcp_server_names={"scheduler"}, user_id="U123")
         call_kwargs = mock_cls.call_args
         options = call_kwargs.kwargs.get("options") or call_kwargs[1]["options"]
-        assert "The current user's Slack ID is U123" in options.system_prompt
-        assert "created_by" in options.system_prompt
+        assert "created_by" not in options.system_prompt
 
     @pytest.mark.asyncio
     async def test_user_id_system_prompt_not_injected_without_scheduler(self):
@@ -1038,6 +1038,159 @@ class TestPlanModeSurfacing:
         assert "Fetch real ones" in result.text
         assert "Pull live samples" in result.text
         assert "Synthetic" in result.text
+
+
+def _ok_client(text="ok"):
+    c = _FakeClaudeSDKClient()
+    c.set_responses([
+        _FakeAssistantMessage(content=[_FakeTextBlock(text=text)]),
+        _FakeResultMessage(),
+    ])
+    return c
+
+
+class _BlockingClient(_FakeClaudeSDKClient):
+    """Client whose turn blocks until ``release`` is set."""
+
+    def __init__(self, options=None):
+        super().__init__(options)
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.turn_done = False
+
+    async def receive_response(self):
+        self.started.set()
+        await self.release.wait()
+        yield _FakeAssistantMessage(content=[_FakeTextBlock(text="super reply")])
+        self.turn_done = True
+        yield _FakeResultMessage()
+
+
+class TestSessionTierRace:
+    @pytest.mark.asyncio
+    async def test_lower_tier_message_does_not_reuse_superuser_session(self):
+        manager = ClaudeManager(_make_config())
+        super_client = _ok_client("super")
+        auth_client = _ok_client("auth")
+        clients = iter([super_client, auth_client])
+        with patch("src.claude_client.ClaudeSDKClient", side_effect=lambda **kw: next(clients)):
+            await manager.send_message("t1", "hi", authorized=True, superuser=True, user_id="U_SUPER")
+            result = await manager.send_message("t1", "hi", authorized=True, superuser=False, user_id="U_AUTH")
+        assert result.text == "auth"
+        assert super_client.query.call_count == 1
+        super_client.disconnect.assert_awaited()
+        assert manager._sessions["t1"].client is auth_client
+        assert manager._sessions["t1"].superuser is False
+
+    @pytest.mark.asyncio
+    async def test_concurrent_lower_tier_message_waits_and_gets_own_session(self):
+        manager = ClaudeManager(_make_config())
+        super_client = _BlockingClient()
+        auth_client = _ok_client("auth")
+        clients = iter([super_client, auth_client])
+        with patch("src.claude_client.ClaudeSDKClient", side_effect=lambda **kw: next(clients)):
+            super_task = asyncio.create_task(manager.send_message(
+                "t1", "secret", authorized=True, superuser=True, user_id="U_SUPER",
+            ))
+            await super_client.started.wait()
+            auth_task = asyncio.create_task(manager.send_message(
+                "t1", "hi", authorized=True, superuser=False, user_id="U_AUTH",
+            ))
+            await asyncio.sleep(0.01)
+            # The superuser's in-flight turn must not be torn down.
+            super_client.disconnect.assert_not_awaited()
+            super_client.release.set()
+            super_result = await super_task
+            auth_result = await auth_task
+        assert super_result.text == "super reply"
+        assert auth_result.text == "auth"
+        # The lower-tier message never ran on the superuser's client.
+        assert super_client.query.call_count == 1
+        super_client.disconnect.assert_awaited()
+        assert manager._sessions["t1"].client is auth_client
+
+    @pytest.mark.asyncio
+    async def test_remove_session_waits_for_in_flight_turn(self):
+        manager = ClaudeManager(_make_config())
+        client = _BlockingClient()
+        with patch("src.claude_client.ClaudeSDKClient", return_value=client):
+            turn = asyncio.create_task(manager.send_message("t1", "hi", user_id="U1"))
+            await client.started.wait()
+            remover = asyncio.create_task(manager.remove_session("t1"))
+            await asyncio.sleep(0.01)
+            client.disconnect.assert_not_awaited()
+            client.release.set()
+            result = await turn
+            await remover
+        assert result.text == "super reply"
+        assert client.turn_done
+        client.disconnect.assert_awaited()
+        assert "t1" not in manager._sessions
+
+    @pytest.mark.asyncio
+    async def test_failed_turn_does_not_remove_a_newer_session(self):
+        manager = ClaudeManager(_make_config())
+        failing = _FakeClaudeSDKClient()
+        newer = _FakeClaudeSDKClient()
+
+        async def _fail_after_replacement(*args, **kwargs):
+            # Simulate the session having been replaced while this turn ran.
+            manager._sessions["t1"] = SessionEntry(client=newer, last_accessed=time.time())
+            raise RuntimeError("boom")
+
+        failing.query = AsyncMock(side_effect=_fail_after_replacement)
+        with patch("src.claude_client.ClaudeSDKClient", return_value=failing):
+            with pytest.raises(RuntimeError):
+                await manager.send_message("t1", "hi", _retry=False)
+        assert manager._sessions["t1"].client is newer
+        newer.disconnect.assert_not_awaited()
+
+
+class TestRequesterIdentity:
+    @pytest.mark.asyncio
+    async def test_tools_see_current_turn_user_not_session_creator(self):
+        """SDK tool handlers run in a task spawned at connect() time, so they
+        inherit the context of the *first* message. current_user_id() must
+        still report the user of the in-flight turn."""
+        import contextvars
+
+        from src.claude_client import current_user_id
+
+        seen: list = []
+
+        class _CtxClient(_FakeClaudeSDKClient):
+            def __init__(self, options=None):
+                super().__init__(options)
+                self.ctx = None
+
+                async def _connect():
+                    self.ctx = contextvars.copy_context()
+
+                async def _query(*a, **k):
+                    seen.append(self.ctx.run(current_user_id))
+
+                self.connect = AsyncMock(side_effect=_connect)
+                self.query = AsyncMock(side_effect=_query)
+
+            async def receive_response(self):
+                yield _FakeAssistantMessage(content=[_FakeTextBlock(text="ok")])
+                yield _FakeResultMessage()
+
+        manager = ClaudeManager(_make_config())
+        with patch("src.claude_client.ClaudeSDKClient", side_effect=lambda **kw: _CtxClient()):
+            await manager.send_message("t1", "a", authorized=True, user_id="U_A")
+            await manager.send_message("t1", "b", authorized=True, user_id="U_B")
+        assert seen == ["U_A", "U_B"]
+
+    def test_current_user_id_outside_session_uses_contextvar(self):
+        from src.claude_client import _current_user_id, current_user_id
+
+        assert current_user_id() is None
+        token = _current_user_id.set("U_X")
+        try:
+            assert current_user_id() == "U_X"
+        finally:
+            _current_user_id.reset(token)
 
 
 def test_deploy_is_always_on():
